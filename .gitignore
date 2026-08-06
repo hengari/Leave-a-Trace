@@ -1,0 +1,10 @@
+node_modules/
+release/
+*.log
+.DS_Store
+Thumbs.db
+
+# 站点评析临时产物（保留 docs 分析文档与自有截图）
+outputs/site-*
+outputs/site-bundle-pretty.js
+outputs/site-core-extract.txt
