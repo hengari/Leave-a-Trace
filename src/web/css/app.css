@@ -1235,14 +1235,17 @@ select.wb-input {
   grid-template-columns: 12px 30px 1fr auto;
   align-items: center;
   gap: 10px;
-  padding: 10px 8px 10px 4px;
+  padding: 12px 8px 12px 4px;
   border-bottom: 1px solid var(--line);
   border-left: 3px solid transparent;
   transition: border-color 0.3s ease, background 0.3s ease;
+  cursor: pointer;
   overflow: hidden;
 }
 
 .task-row:last-child { border-bottom: 0; }
+
+.task-row:hover { background: var(--hover); }
 
 .task-row.overdue { border-left-color: var(--danger); }
 
@@ -1274,8 +1277,8 @@ select.wb-input {
 }
 
 .task-check {
-  width: 22px;
-  height: 22px;
+  width: 27px;
+  height: 27px;
   border-radius: 50%;
   border: 1.5px solid var(--line-strong);
   background: var(--panel);
@@ -1288,8 +1291,8 @@ select.wb-input {
 }
 
 .task-check svg {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
   stroke: #fff;
   stroke-width: 2.4;
   fill: none;
@@ -1601,6 +1604,110 @@ select.wb-input {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/* ============ 截止时间编辑器 ============ */
+.deadline-modal { width: min(430px, calc(100vw - 40px)); }
+
+.range-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.range-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.range-inputs {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.range-inputs input {
+  font-family: var(--font-num, inherit);
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.dl-calendar {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--panel);
+}
+
+.dl-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.dl-cal-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dl-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.dl-cal-grid .dow {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0 6px;
+}
+
+.dl-day {
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 0;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.dl-day:hover { transform: scale(1.12); }
+
+.dl-day.out { color: var(--muted); opacity: 0.45; }
+
+.dl-day.today { outline: 1.5px solid var(--accent); outline-offset: -2px; }
+
+.dl-day.range-edge {
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 0 0 1.5px var(--panel) inset;
+}
+
+.dl-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.confetti-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 90;
 }
 
 @media (max-width: 760px) {

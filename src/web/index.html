@@ -43,7 +43,7 @@
             <button class="icon-btn" id="next-day" type="button" title="后一天">›</button>
             <button class="ghost-btn" id="today-btn" type="button" title="回到今天">回到今天</button>
           </div>
-          <button class="checkin-btn" id="checkin-btn" type="button">打卡</button>
+          <button class="checkin-btn" id="checkin-btn" type="button" title="今天任务都完成了？点一下庆祝，误触可再点恢复">任务完成</button>
         </header>
         <p class="write-banner hidden" id="write-banner">补写模式 · 当前记录写入所选日期</p>
 
@@ -155,7 +155,7 @@
         </header>
         <section class="panel">
           <div class="panel-head"><h2>导出备份</h2></div>
-          <p class="sub">导出全部数据为 JSON 文件（含任务、打卡、文件索引、设置），可在任意设备重新导入。</p>
+          <p class="sub">导出全部数据为 JSON 文件（含任务、完成标记、文件索引、设置），可在任意设备重新导入。</p>
           <div class="btn-row">
             <button class="primary-btn" id="export-btn" type="button">导出 JSON 备份</button>
           </div>
@@ -193,7 +193,7 @@
           </div>
         </section>
         <section class="panel">
-          <div class="panel-head"><h2>任务与打卡</h2></div>
+          <div class="panel-head"><h2>任务与完成标记</h2></div>
           <div class="setting-row">
             <label for="threshold-input">临近渐变阈值（分钟）</label>
             <input type="number" id="threshold-input" min="5" max="1440" step="5">
@@ -205,7 +205,7 @@
         </section>
         <section class="panel">
           <div class="panel-head"><h2>演示数据</h2></div>
-          <p class="sub">首次使用预置了少量示例任务与打卡，帮助你快速看懂三态与动效。</p>
+          <p class="sub">首次使用预置了少量示例任务与完成标记，帮助你快速看懂三态与动效。</p>
           <div class="btn-row">
             <button class="ghost-btn" id="clear-demo-btn" type="button">清空演示数据</button>
             <button class="ghost-btn" id="restore-demo-btn" type="button">恢复演示数据</button>

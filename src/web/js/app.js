@@ -44,6 +44,12 @@ function fmtDateTime(iso) {
   return dateStr(d) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
 }
 
+function fmtShortDate(s) {
+  if (!s) return "";
+  const d = parseDate(s);
+  return (d.getMonth() + 1) + "/" + d.getDate();
+}
+
 function hourMinToToday(h, m) {
   const d = new Date();
   d.setHours(h, m, 0, 0);
@@ -410,8 +416,27 @@ function renderRoute() {
 let cursorDate = todayStr();
 
 function dayTasks(date) {
-  const d = state.days[date];
-  return d ? d.tasks : [];
+  const own = (state.days[date] && state.days[date].tasks) || [];
+  const seen = new Set(own.map((t) => t.id));
+  const merged = own.slice();
+  allTasks().forEach((t) => {
+    if (!seen.has(t.id) && taskActiveOn(t, date)) merged.push(t);
+  });
+  return merged;
+}
+
+function allTasks() {
+  const out = [];
+  Object.keys(state.days).forEach((d) => {
+    (state.days[d].tasks || []).forEach((t) => out.push(t));
+  });
+  return out;
+}
+
+function taskActiveOn(task, date) {
+  if (!task.startDate) return false;
+  const end = task.deadline ? dateStr(new Date(task.deadline)) : task.startDate;
+  return task.startDate <= date && date <= end;
 }
 
 function ensureDay(date) {
@@ -500,14 +525,20 @@ function taskRow(task, followup, interactive) {
   status.className = "task-status " + (isOverdue(task) ? "overdue" : task.status);
   status.title = task.status === "in_progress" ? "进行中（点击切换为未完成）"
     : task.status === "pending" ? "未完成（点击切换为进行中）" : "已完成";
-  if (interactive) status.addEventListener("click", () => cycleStatus(task.id));
+  if (interactive) status.addEventListener("click", (e) => {
+    e.stopPropagation();
+    cycleStatus(task.id);
+  });
 
   const check = document.createElement("button");
   check.type = "button";
   check.className = "task-check" + (task.status === "done" ? " done" : "");
   check.title = task.status === "done" ? "取消完成" : "标记完成";
   check.innerHTML = '<svg viewBox="0 0 12 12"><path d="M2 6.5 5 9.5 10 2.5"/></svg>';
-  if (interactive) check.addEventListener("click", () => toggleDone(task.id));
+  if (interactive) check.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleDone(task.id);
+  });
   else check.disabled = true;
 
   const main = document.createElement("div");
@@ -535,11 +566,10 @@ function taskRow(task, followup, interactive) {
   chip.type = "button";
   chip.className = "deadline-chip";
   updateChip(chip, task);
-  if (interactive) {
-    /* 悬浮即出现时间编辑框；触屏/点击同样可编辑 */
-    chip.addEventListener("mouseenter", () => openChipEditor(chip, task));
-    chip.addEventListener("click", () => openChipEditor(chip, task));
-  }
+  if (interactive) chip.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openDeadlineEditor(task);
+  });
   else chip.disabled = true;
   meta.appendChild(chip);
   main.appendChild(meta);
@@ -548,7 +578,10 @@ function taskRow(task, followup, interactive) {
     const timer = document.createElement("div");
     timer.className = "task-timer";
     const fill = document.createElement("span");
-    const total = Math.max(new Date(task.deadline) - new Date(task.createdAt), 3600000);
+    const rangeStart = task.startDate
+      ? new Date(task.startDate + "T" + (task.startTime || "00:00") + ":00")
+      : new Date(task.createdAt);
+    const total = Math.max(new Date(task.deadline) - rangeStart, 3600000);
     const remaining = new Date(task.deadline) - Date.now();
     const ratio = Math.min(1, Math.max(0, remaining / total));
     fill.style.width = Math.round(ratio * 100) + "%";
@@ -564,23 +597,33 @@ function taskRow(task, followup, interactive) {
       const later = document.createElement("button");
       later.textContent = "顺延";
       later.title = "截止时间顺延 8 小时";
-      later.addEventListener("click", () => postpone(task.id));
+      later.addEventListener("click", (e) => {
+        e.stopPropagation();
+        postpone(task.id);
+      });
       actions.appendChild(later);
       const giveUp = document.createElement("button");
       giveUp.textContent = "放弃";
       giveUp.title = "标记为未完成（归档）";
-      giveUp.addEventListener("click", () => giveUpTask(task.id));
+      giveUp.addEventListener("click", (e) => {
+        e.stopPropagation();
+        giveUpTask(task.id);
+      });
       actions.appendChild(giveUp);
     }
     const del = document.createElement("button");
     del.textContent = "删除";
     del.className = "danger";
-    del.addEventListener("click", () => removeTask(task.id));
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeTask(task.id);
+    });
     actions.appendChild(del);
     li.append(status, check, main, actions);
   } else {
     li.append(status, check, main);
   }
+  if (interactive) li.addEventListener("click", () => toggleDone(task.id));
   return li;
 }
 
@@ -588,14 +631,21 @@ function updateChip(chip, task) {
   chip.className = "deadline-chip";
   if (task.deadline) {
     const dl = new Date(task.deadline);
+    const dlDate = dateStr(dl);
     const sameDay = dateStr(dl) === cursorDate;
     const over = isOverdue(task);
     const near = !over && task.status !== "done" && dl.getTime() - Date.now() < state.settings.gradientThresholdMin * 60000;
     if (over) chip.classList.add("overdue");
     else if (near) chip.classList.add("near");
-    const label = over
-      ? "已逾期 " + Math.max(1, Math.round((Date.now() - dl.getTime()) / 3600000)) + " 小时"
-      : (sameDay ? "截止 " + fmtClock(task.deadline) : "截止 " + fmtDateTime(task.deadline));
+    let label;
+    if (over) {
+      label = "已逾期 " + Math.max(1, Math.round((Date.now() - dl.getTime()) / 3600000)) + " 小时";
+    } else if (task.startDate && task.startDate !== dlDate) {
+      label = fmtShortDate(task.startDate) + " " + (task.startTime || "00:00") + " → " +
+        fmtShortDate(dlDate) + " " + fmtClock(task.deadline);
+    } else {
+      label = sameDay ? "截止 " + fmtClock(task.deadline) : "截止 " + fmtDateTime(task.deadline);
+    }
     chip.textContent = label;
   } else {
     chip.textContent = "设置截止";
@@ -611,43 +661,197 @@ function toneFor(task) {
   return lerpColor(AMBER, ACCENT, t);
 }
 
-function openChipEditor(chip, task) {
-  if (chip._editing) return;
-  chip._editing = true;
-  const input = document.createElement("input");
-  input.type = "datetime-local";
-  input.className = "chip-edit-input";
-  if (task.deadline) {
-    const d = new Date(task.deadline);
-    input.value = dateStr(d) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+/* ============ 截止时间编辑器（自定义日历 + 确定按钮 + 区间渐变） ============ */
+let dlEditor = null; // { task, calYear, calMonth }
+
+function openDeadlineEditor(task) {
+  if (!dlEditor) {
+    buildDeadlineModal();
+    dlEditor = {};
   }
-  input.placeholder = "设置截止";
-  chip.replaceWith(input);
-  input.focus();
-  let done = false;
-  const finish = (commit) => {
-    if (done) return;
-    done = true;
-    if (commit && input.value) {
-      task.deadline = new Date(input.value).toISOString();
-      save();
-      renderToday();
-      toast("截止时间已更新");
-      return;
+  dlEditor.task = task;
+  const defaultStart = task.startDate || (task.deadline ? dateStr(new Date(task.deadline)) : cursorDate);
+  const defaultEnd = task.deadline ? dateStr(new Date(task.deadline)) : defaultStart;
+  $("#dl-start-date").value = defaultStart;
+  $("#dl-start-time").value = task.startTime || "09:00";
+  $("#dl-end-date").value = defaultEnd;
+  $("#dl-end-time").value = task.deadline ? fmtClock(task.deadline) : "18:00";
+  const base = parseDate(defaultStart || todayStr());
+  dlEditor.calYear = base.getFullYear();
+  dlEditor.calMonth = base.getMonth();
+  renderDeadlineCalendar();
+  $("#deadline-modal").classList.remove("hidden");
+}
+
+function buildDeadlineModal() {
+  const mask = document.createElement("div");
+  mask.className = "modal-mask hidden";
+  mask.id = "deadline-modal";
+  mask.innerHTML =
+    '<div class="modal deadline-modal">' +
+      "<h3>设置截止时间</h3>" +
+      '<div class="range-row">' +
+        "<label>开始时间" +
+          '<span class="range-inputs"><input type="date" id="dl-start-date"><input type="time" id="dl-start-time"></span>' +
+        "</label>" +
+        "<label>截止时间" +
+          '<span class="range-inputs"><input type="date" id="dl-end-date"><input type="time" id="dl-end-time"></span>' +
+        "</label>" +
+      "</div>" +
+      '<div class="dl-calendar">' +
+        '<div class="dl-cal-head">' +
+          '<button class="icon-btn" type="button" id="dl-prev" title="上个月">‹</button>' +
+          '<span class="dl-cal-title" id="dl-cal-title"></span>' +
+          '<button class="icon-btn" type="button" id="dl-next" title="下个月">›</button>' +
+        "</div>" +
+        '<div class="dl-cal-grid" id="dl-cal-grid"></div>' +
+      "</div>" +
+      '<p class="dl-hint">点击日历选择开始与截止日期：开始和结束为深色，中间日期为浅色渐变。</p>' +
+      '<div class="modal-actions">' +
+        '<button class="ghost-btn" type="button" id="dl-clear">清除截止</button>' +
+        '<button class="ghost-btn" type="button" id="dl-cancel">取消</button>' +
+        '<button class="primary-btn" type="button" id="dl-ok">确定</button>' +
+      "</div>" +
+    "</div>";
+  document.body.appendChild(mask);
+
+  mask.addEventListener("click", (e) => {
+    if (e.target === mask) closeDeadlineModal();
+  });
+  $("#dl-ok").addEventListener("click", applyDeadline);
+  $("#dl-cancel").addEventListener("click", closeDeadlineModal);
+  $("#dl-clear").addEventListener("click", clearDeadline);
+  $("#dl-prev").addEventListener("click", () => {
+    dlEditor.calMonth -= 1;
+    if (dlEditor.calMonth < 0) { dlEditor.calMonth = 11; dlEditor.calYear -= 1; }
+    renderDeadlineCalendar();
+  });
+  $("#dl-next").addEventListener("click", () => {
+    dlEditor.calMonth += 1;
+    if (dlEditor.calMonth > 11) { dlEditor.calMonth = 0; dlEditor.calYear += 1; }
+    renderDeadlineCalendar();
+  });
+  ["dl-start-date", "dl-end-date"].forEach((id) => {
+    $("#" + id).addEventListener("change", renderDeadlineCalendar);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && dlEditor && !$("#deadline-modal").classList.contains("hidden")) {
+      closeDeadlineModal();
     }
-    renderToday();
-  };
-  input.addEventListener("change", () => finish(true));
-  input.addEventListener("blur", () => finish(false));
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); finish(true); }
-    if (e.key === "Escape") { e.stopPropagation(); input.blur(); finish(false); }
   });
 }
 
-/* 兼容旧引用 */
-function openDeadlineEditor(chip, task) {
-  return openChipEditor(chip, task);
+function closeDeadlineModal() {
+  $("#deadline-modal").classList.add("hidden");
+  dlEditor.task = null;
+  renderToday();
+}
+
+function clearDeadline() {
+  const task = dlEditor.task;
+  if (!task) return;
+  task.startDate = undefined;
+  task.startTime = undefined;
+  task.deadline = null;
+  save();
+  closeDeadlineModal();
+  toast("已清除截止时间");
+}
+
+function applyDeadline() {
+  const task = dlEditor.task;
+  if (!task) return;
+  const sd = $("#dl-start-date").value;
+  const ed = $("#dl-end-date").value;
+  const st = $("#dl-start-time").value || "00:00";
+  const et = $("#dl-end-time").value || "23:59";
+  if (!sd || !ed) { toast("请选择开始与截止日期", true); return; }
+  if (ed < sd) { toast("截止日期不能早于开始日期", true); return; }
+  task.startDate = sd;
+  task.startTime = st;
+  task.deadline = new Date(ed + "T" + et + ":00").toISOString();
+  task.givenUp = false;
+  save();
+  closeDeadlineModal();
+  toast("已设置截止时间");
+}
+
+function renderDeadlineCalendar() {
+  const title = $("#dl-cal-title");
+  const grid = $("#dl-cal-grid");
+  if (!title || !grid || !dlEditor) return;
+  const y = dlEditor.calYear, m = dlEditor.calMonth;
+  title.textContent = y + " 年 " + (m + 1) + " 月";
+  grid.textContent = "";
+  ["一", "二", "三", "四", "五", "六", "日"].forEach((w) => {
+    const c = document.createElement("span");
+    c.className = "dow";
+    c.textContent = w;
+    grid.appendChild(c);
+  });
+  const first = new Date(y, m, 1);
+  const startOffset = (first.getDay() + 6) % 7; // 周一开头
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const startDate = $("#dl-start-date").value;
+  const endDate = $("#dl-end-date").value;
+  for (let i = 0; i < startOffset; i++) {
+    const c = document.createElement("span");
+    c.className = "dl-day out";
+    grid.appendChild(c);
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = y + "-" + pad(m + 1) + "-" + pad(d);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dl-day";
+    btn.textContent = d;
+    btn.dataset.date = ds;
+    if (ds === todayStr()) btn.classList.add("today");
+    if (startDate && endDate && startDate <= ds && ds <= endDate) {
+      btn.style.background = rangeTone(ds, startDate, endDate);
+      if (ds === startDate || ds === endDate) {
+        btn.classList.add("range-edge");
+        btn.style.color = "#fff";
+        btn.style.fontWeight = "700";
+      }
+    }
+    btn.addEventListener("click", () => {
+      const s = $("#dl-start-date").value;
+      if (!s || ds < s) {
+        $("#dl-start-date").value = ds;
+      } else {
+        $("#dl-end-date").value = ds;
+      }
+      renderDeadlineCalendar();
+    });
+    grid.appendChild(btn);
+  }
+}
+
+const RANGE_BASE = {
+  paper: "#e8590c",  // 默认纸感：暖橙色调
+  dark: "#4dabf7",   // 深色：冷蓝色调
+  modern: "#4f46e5"  // 现代：靛蓝（冷）
+};
+
+function rangeBase() {
+  const theme = document.documentElement.dataset.theme || "paper";
+  return RANGE_BASE[theme] || RANGE_BASE.paper;
+}
+
+function rangeTone(ds, start, end) {
+  const s = parseDate(start).getTime();
+  const e = parseDate(end).getTime();
+  const v = parseDate(ds).getTime();
+  const n = Math.round((e - s) / DAY_MS);
+  const base = hexToRgb(rangeBase());
+  const dark = base.map((x) => Math.round(x * 0.42));
+  const light = base.map((x) => Math.round(x + (255 - x) * 0.72));
+  if (n <= 0) return "rgb(" + dark.join(",") + ")";
+  const i = Math.round((v - s) / DAY_MS);
+  const depth = 1 - Math.abs(i / n - 0.5) * 2; // 两端 0（深），中间 1（浅）
+  const c = dark.map((x, k) => Math.round(x + (light[k] - x) * depth));
+  return "rgb(" + c.join(",") + ")";
 }
 
 function addTask() {
@@ -721,9 +925,13 @@ function cycleStatus(id) {
 }
 
 function removeTask(id) {
-  const day = state.days[cursorDate];
-  if (!day) return;
-  day.tasks = day.tasks.filter((t) => t.id !== id);
+  let removed = false;
+  Object.keys(state.days).forEach((d) => {
+    const before = (state.days[d].tasks || []).length;
+    state.days[d].tasks = (state.days[d].tasks || []).filter((t) => t.id !== id);
+    if (state.days[d].tasks.length !== before) removed = true;
+  });
+  if (!removed) return;
   save();
   renderToday();
   toast("任务已删除");
@@ -750,18 +958,23 @@ function giveUpTask(id) {
 }
 
 function findTask(id) {
-  const day = state.days[cursorDate];
-  return day ? day.tasks.find((t) => t.id === id) : null;
+  let hit = null;
+  Object.keys(state.days).forEach((d) => {
+    if (!hit) hit = (state.days[d].tasks || []).find((t) => t.id === id) || null;
+  });
+  return hit;
 }
 
 function renderCheckin() {
   const day = ensureDay(cursorDate);
   const btn = $("#checkin-btn");
   if (day.checkIn && day.checkIn.checked) {
-    btn.textContent = "已打卡 " + fmtClock(day.checkIn.checkedAt);
+    btn.textContent = "今天辛苦啦 ✓";
+    btn.title = "误触了？再点一次恢复";
     btn.classList.add("checked");
   } else {
-    btn.textContent = "打卡";
+    btn.textContent = "任务完成";
+    btn.title = "今天任务都完成了？点一下庆祝，误触可再点恢复";
     btn.classList.remove("checked");
   }
 }
@@ -769,7 +982,10 @@ function renderCheckin() {
 function doCheckin() {
   const day = ensureDay(cursorDate);
   if (day.checkIn && day.checkIn.checked) {
-    toast("今天已经打过卡了");
+    day.checkIn = null;
+    save();
+    renderCheckin();
+    toast("已恢复（误触了也没关系）");
     return;
   }
   day.checkIn = { checked: true, checkedAt: new Date().toISOString() };
@@ -779,7 +995,81 @@ function doCheckin() {
   btn.classList.remove("stamped");
   void btn.offsetWidth;
   btn.classList.add("stamped");
-  toast("已打卡，今天有迹可循");
+  celebrate();
+  toast("今天辛苦啦");
+}
+
+/* ============ 庆祝动画：花朵 + 丝带洒落 ============ */
+function celebrate() {
+  const canvas = document.createElement("canvas");
+  canvas.className = "confetti-canvas";
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const resize = () => {
+    canvas.width = Math.floor(window.innerWidth * DPR);
+    canvas.height = Math.floor(window.innerHeight * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  };
+  resize();
+  window.addEventListener("resize", resize);
+
+  const COLORS = ["#ff6b81", "#ffb86b", "#ffd93d", "#6fcf97", "#74b9ff", "#e056fd", "#ff8a5c"];
+  const FLOWER = "\u{1F338}"; // 🌸
+  const parts = [];
+  const total = 120;
+  for (let i = 0; i < total; i++) {
+    const ribbon = i % 3 !== 0; // 2/3 丝带，1/3 花朵
+    const size = ribbon ? 8 + Math.random() * 10 : 14 + Math.random() * 12;
+    parts.push({
+      ribbon: ribbon,
+      x: Math.random() * window.innerWidth,
+      y: -24 - Math.random() * window.innerHeight * 0.45,
+      w: size,
+      h: ribbon ? 4 + Math.random() * 6 : size,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      vy: 2.2 + Math.random() * 3.4,
+      vx: (Math.random() - 0.5) * 1.6,
+      rot: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.22,
+      sway: 0.6 + Math.random() * 1.4,
+      swayPhase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  const start = performance.now();
+  const DURATION = 3200;
+  const frame = (now) => {
+    const t = (now - start) / DURATION;
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    for (const p of parts) {
+      p.vy += 0.012;
+      p.x += p.vx + Math.sin(now * 0.003 + p.swayPhase) * p.sway;
+      p.y += p.vy;
+      p.rot += p.vr;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.globalAlpha = Math.max(0, 1 - t * 1.35);
+      if (p.ribbon) {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      } else {
+        ctx.font = p.w + "px serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(FLOWER, 0, 0);
+      }
+      ctx.restore();
+    }
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      canvas.remove();
+      window.removeEventListener("resize", resize);
+    }
+  };
+  requestAnimationFrame(frame);
 }
 
 /* ============ 月度汇总 ============ */
@@ -797,7 +1087,7 @@ function monthTasks(ym) {
   const out = [];
   Object.keys(state.days).forEach((d) => {
     if (!d.startsWith(ym)) return;
-    const tasks = state.days[d].tasks || [];
+    const tasks = dayTasks(d);
     tasks.forEach((t) => out.push(Object.assign({ date: d }, t)));
   });
   return out;
@@ -889,7 +1179,7 @@ function buildMonthlyMD(ym) {
   lines.push("| 完成率 | " + rate + "% |");
   lines.push("| 进行中 | " + doing + " |");
   lines.push("| 未完成 | " + pending + " |");
-  lines.push("| 打卡天数 | " + checkinDays + " 天 |");
+  lines.push("| 完成天数 | " + checkinDays + " 天 |");
   lines.push("| 逾期任务 | " + overdue + " |");
   lines.push("");
   lines.push("## 按日明细");
@@ -952,7 +1242,7 @@ function renderMonthly() {
     { num: rate + "%", label: "完成率" },
     { num: doing, label: "进行中" },
     { num: pending, label: "未完成" },
-    { num: checkinDays + " 天", label: "打卡天数" },
+    { num: checkinDays + " 天", label: "完成天数" },
     { num: overdue, label: "逾期任务" }
   ].forEach((it) => {
     const box = document.createElement("div");
@@ -1178,7 +1468,7 @@ function monthlyReportHTML(ym) {
     + "table{border-collapse:collapse;font-size:13px}td,th{border:1px solid #d4cfc2;padding:5px 12px}@media print{body{margin:12mm auto}}"
     + "</style></head><body>"
     + "<h1>" + y + " 年 " + m + " 月工作汇总 · 留痕</h1>"
-    + "<table><tr><th>任务总数</th><th>已完成</th><th>完成率</th><th>打卡天数</th></tr>"
+    + "<table><tr><th>任务总数</th><th>已完成</th><th>完成率</th><th>完成天数</th></tr>"
     + "<tr><td>" + total + "</td><td>" + done + " / " + total + "</td><td>" + rate + "%</td><td>" + checkinDays + " 天</td></tr></table>"
     + "<h2>按日明细</h2>" + (daysHtml || "<p>该月暂无任务记录。</p>")
     + "<p style=\"color:#7a7d84;font-size:12px\">生成时间：" + fmtDateTime(new Date().toISOString()) + " · 数据版本 trace:v1</p>"
