@@ -1,0 +1,49 @@
+{
+  "name": "liuhen-desktop",
+  "productName": "留痕",
+  "version": "1.0.7",
+  "description": "留痕 · Leave a Trace 桌面版（纯本地工作记录 + 项目工作台）",
+  "main": "electron/main.cjs",
+  "author": "liuheng",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
+    "web": "node scripts/serve.mjs"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.local.liuhen",
+    "productName": "留痕",
+    "files": [
+      "electron/**/*",
+      "src/web/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "留痕-${version}-setup.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "留痕"
+    }
+  }
+}

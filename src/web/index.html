@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>留痕 · Leave a Trace</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body data-page="today">
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="#today">留痕<span class="brand-en">Leave a Trace</span></a>
+      <nav class="nav-list">
+        <a class="nav-link" href="#today">今日记录</a>
+        <a class="nav-link" href="#monthly">月度汇总</a>
+        <a class="nav-link" href="#files">文件库</a>
+        <a class="nav-link" href="#backup">备份与恢复</a>
+        <a class="nav-link" href="#settings">设置</a>
+        <a class="nav-link" href="#workbench">项目工作台</a>
+      </nav>
+      <button class="theme-btn" id="theme-toggle" type="button" aria-label="切换深浅色">☾</button>
+    </aside>
+
+    <main class="main">
+      <!-- 全局搜索（常驻顶部） -->
+      <div class="global-search" id="global-search">
+        <div class="search-input-wrap">
+          <span aria-hidden="true">🔍</span>
+          <input id="search-input" type="text" placeholder="搜索任务 / 文件 / 月报" autocomplete="off">
+          <div class="search-results hidden" id="search-results"></div>
+        </div>
+      </div>
+
+      <!-- 今日记录 -->
+      <section class="view" id="view-today">
+        <header class="day-head">
+          <div class="day-nav">
+            <button class="icon-btn" id="prev-day" type="button" title="前一天">‹</button>
+            <div class="day-title">
+              <h1 id="day-title">—</h1>
+              <p class="eyebrow" id="day-sub"></p>
+            </div>
+            <button class="icon-btn" id="next-day" type="button" title="后一天">›</button>
+            <button class="ghost-btn" id="today-btn" type="button" title="回到今天">回到今天</button>
+          </div>
+          <button class="checkin-btn" id="checkin-btn" type="button">打卡</button>
+        </header>
+        <p class="write-banner hidden" id="write-banner">补写模式 · 当前记录写入所选日期</p>
+
+        <section class="panel progress-panel">
+          <div class="progress-line">
+            <span class="progress-label" id="progress-text">—</span>
+            <div class="progress-track"><span class="progress-fill" id="progress-fill"></span></div>
+          </div>
+          <div class="badges">
+            <span class="badge badge-doing" id="badge-doing">进行中 0</span>
+            <span class="badge badge-done" id="badge-done">已完成 0</span>
+            <span class="badge badge-pending" id="badge-pending">未完成 0</span>
+          </div>
+        </section>
+
+        <section class="panel" id="followup-panel">
+          <div class="panel-head">
+            <h2>需跟进</h2>
+            <span class="count" id="followup-count"></span>
+          </div>
+          <ul class="task-list" id="followup-list"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>任务</h2>
+            <span class="count" id="task-count"></span>
+          </div>
+          <form class="add-form" id="add-form" autocomplete="off">
+            <input id="task-input" type="text" placeholder="添加任务，支持“任务名 18:00”快速设置截止时间">
+            <button class="primary-btn" type="submit">添加</button>
+          </form>
+          <ul class="task-list" id="task-list"></ul>
+          <p class="empty-hint" id="empty-hint">今天还没有任务，先记下第一件事吧。</p>
+        </section>
+      </section>
+
+      <!-- 月度汇总 -->
+      <section class="view" id="view-monthly">
+        <header class="page-head">
+          <p class="eyebrow">按自然月整合完成情况</p>
+          <h1>月度汇总</h1>
+        </header>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>月度总览</h2>
+            <div class="month-picker">
+              <input type="month" id="month-input">
+              <button class="ghost-btn btn-sm" id="month-today-btn" type="button">本月</button>
+            </div>
+          </div>
+          <div class="metric-row" id="monthly-metrics"></div>
+          <div class="btn-row">
+            <button class="primary-btn" id="monthly-gen-md" type="button">生成 Markdown</button>
+            <button class="ghost-btn" id="monthly-export-pdf" type="button">导出 PDF</button>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>热力图</h2><span class="count" id="monthly-heatmap-count"></span></div>
+          <p class="sub">全年 12 个月每天完成率（颜色越深完成率越高，点击格子跳到当天）。</p>
+          <div class="monthly-heatmaps" id="monthly-heatmaps"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>按日明细</h2><span class="count" id="monthly-day-count"></span></div>
+          <div id="monthly-days"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>需跟进清单</h2><span class="count" id="monthly-followup-count"></span></div>
+          <ul class="task-list" id="monthly-followup"></ul>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>已生成月报</h2><span class="count" id="monthly-report-count"></span></div>
+          <div id="monthly-reports"></div>
+        </section>
+      </section>
+
+      <!-- 文件库 -->
+      <section class="view" id="view-files">
+        <header class="page-head">
+          <p class="eyebrow">表格 / PDF 本地归档</p>
+          <h1>文件库</h1>
+        </header>
+        <section class="panel">
+          <div class="panel-head"><h2>文件库</h2><span class="count" id="file-count"></span></div>
+          <div class="file-dropzone" id="file-dropzone">
+            <b>+</b>
+            <strong>拖拽或点击导入文件</strong>
+            <span>支持 xlsx / xls、PDF、Word（doc/docx）、PPT（ppt/pptx）、图片、文本。文件统一存储到数据库文件库。</span>
+          </div>
+          <input type="file" id="file-input" class="hidden" multiple accept=".xlsx,.xls,.pdf,.doc,.docx,.ppt,.pptx,.csv,.md,.txt,.json,.png,.jpg,.jpeg,.webp,.gif">
+          <div class="files-toolbar">
+            <div class="wb-switch-tabs" id="files-tabs">
+              <button class="wb-switch-tab active" type="button" data-files-tab="all">全部</button>
+              <button class="wb-switch-tab" type="button" data-files-tab="sheet">表格</button>
+              <button class="wb-switch-tab" type="button" data-files-tab="pdf">PDF</button>
+              <button class="wb-switch-tab" type="button" data-files-tab="other">其他</button>
+            </div>
+          </div>
+          <div id="file-list"></div>
+          <p class="sub">内置预览：PDF / 图片 / 文本 / 表格（SheetJS）/ Word / PPT（文字提取）。</p>
+        </section>
+      </section>
+
+      <!-- 备份与恢复 -->
+      <section class="view" id="view-backup">
+        <header class="page-head">
+          <p class="eyebrow">数据只属于你</p>
+          <h1>备份与恢复</h1>
+        </header>
+        <section class="panel">
+          <div class="panel-head"><h2>导出备份</h2></div>
+          <p class="sub">导出全部数据为 JSON 文件（含任务、打卡、文件索引、设置），可在任意设备重新导入。</p>
+          <div class="btn-row">
+            <button class="primary-btn" id="export-btn" type="button">导出 JSON 备份</button>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>导入备份</h2></div>
+          <p class="sub">导入前会自动生成当前数据快照，可选择"合并"或"替换"，不限条数。</p>
+          <div class="btn-row">
+            <button class="ghost-btn" id="import-btn" type="button">选择 JSON 文件导入</button>
+            <input type="file" id="import-file" accept=".json,application/json" class="hidden">
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>快照与容量</h2></div>
+          <p class="sub" id="snapshot-info">—</p>
+          <p class="sub" id="storage-info">—</p>
+        </section>
+      </section>
+
+      <!-- 设置 -->
+      <section class="view" id="view-settings">
+        <header class="page-head">
+          <p class="eyebrow">偏好与数据管理</p>
+          <h1>设置</h1>
+        </header>
+        <section class="panel">
+          <div class="panel-head"><h2>外观</h2></div>
+          <div class="setting-row">
+            <label for="theme-select">风格</label>
+            <select id="theme-select">
+              <option value="paper">纸感手账（默认）</option>
+              <option value="dark">墨夜深色</option>
+              <option value="modern">现代克制</option>
+            </select>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>任务与打卡</h2></div>
+          <div class="setting-row">
+            <label for="threshold-input">临近渐变阈值（分钟）</label>
+            <input type="number" id="threshold-input" min="5" max="1440" step="5">
+          </div>
+          <div class="setting-row">
+            <label for="reminder-toggle">新增记录满 20 条提醒备份</label>
+            <input type="checkbox" id="reminder-toggle">
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>演示数据</h2></div>
+          <p class="sub">首次使用预置了少量示例任务与打卡，帮助你快速看懂三态与动效。</p>
+          <div class="btn-row">
+            <button class="ghost-btn" id="clear-demo-btn" type="button">清空演示数据</button>
+            <button class="ghost-btn" id="restore-demo-btn" type="button">恢复演示数据</button>
+          </div>
+        </section>
+      </section>
+
+      <!-- 项目工作台（复刻 project-workbench-v014，独立数据键，不影响上方既有模块） -->
+      <section class="view" id="view-workbench">
+        <header class="wb-topbar">
+          <div class="wb-title">
+            <h1 id="wb-page-title">项目工作台</h1>
+            <p id="wb-page-sub">把微信消息、聊天记录和领导指令整理成任务，按项目管理进展，自动生成日报 / 周报。</p>
+          </div>
+          <div class="wb-actions">
+            <button class="ghost-btn" id="wb-notepad-btn" type="button">记事本</button>
+            <button class="ghost-btn" id="wb-ai-btn" type="button">AI助手</button>
+            <button class="primary-btn" id="wb-intake-btn" type="button">任务录入</button>
+          </div>
+        </header>
+
+        <div class="wb-guide hidden" id="wb-guide">
+          <span id="wb-guide-text"></span>
+          <button class="ghost-btn btn-sm" id="wb-guide-close" type="button">知道了</button>
+        </div>
+
+        <nav class="wb-nav" aria-label="项目工作台导航">
+          <button class="wb-nav-item active" type="button" data-wb="home">工作台</button>
+          <button class="wb-nav-item" type="button" data-wb="intake">任务录入</button>
+          <button class="wb-nav-item" type="button" data-wb="tasks">任务清单</button>
+          <button class="wb-nav-item" type="button" data-wb="projects">项目管理</button>
+          <button class="wb-nav-item" type="button" data-wb="reports">日报 / 周报</button>
+          <button class="wb-nav-item" type="button" data-wb="settings">设置</button>
+        </nav>
+
+        <div class="wb-view active" id="wb-home"></div>
+        <div class="wb-view" id="wb-intake"></div>
+        <div class="wb-view" id="wb-tasks"></div>
+        <div class="wb-view" id="wb-projects"></div>
+        <div class="wb-view" id="wb-reports"></div>
+        <div class="wb-view" id="wb-settings"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <!-- 数据损坏恢复向导 -->
+  <div class="modal-mask hidden" id="corrupt-modal">
+    <div class="modal">
+      <h3>数据读取失败</h3>
+      <p id="corrupt-msg">检测到本地数据损坏，已隔离原数据。请选择恢复方式：</p>
+      <div class="modal-actions">
+        <button class="primary-btn" id="corrupt-snapshot" type="button">恢复最近快照</button>
+        <button class="ghost-btn" id="corrupt-import" type="button">导入备份文件</button>
+        <button class="ghost-btn" id="corrupt-reset" type="button">清空重建（含演示数据）</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入方式确认 -->
+  <div class="modal-mask hidden" id="import-modal">
+    <div class="modal">
+      <h3>导入备份</h3>
+      <p id="import-preview">—</p>
+      <div class="modal-actions">
+        <button class="primary-btn" id="import-merge" type="button">合并（按日期覆盖）</button>
+        <button class="ghost-btn" id="import-replace" type="button">替换全部数据</button>
+        <button class="ghost-btn" id="import-cancel" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 月度汇总：Markdown 预览 -->
+  <div class="modal-mask hidden" id="monthly-preview-modal">
+    <div class="modal modal-wide">
+      <h3>Markdown 预览</h3>
+      <pre class="md-preview" id="monthly-preview-content"></pre>
+      <div class="modal-actions">
+        <button class="primary-btn" id="monthly-download-md" type="button">下载 .md</button>
+        <button class="ghost-btn" id="monthly-copy-md" type="button">复制</button>
+        <button class="ghost-btn" id="monthly-preview-close" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工作台：记事本 -->
+  <div class="modal-mask hidden" id="wb-notepad-modal">
+    <div class="modal">
+      <h3>记事本</h3>
+      <p class="sub">临时想法、零散记录可以先放这里。</p>
+      <label for="wb-notepad-input">内容</label>
+      <textarea id="wb-notepad-input" class="input-area" rows="4" placeholder="临时想法、零散记录、未整理信息可以先写在这里。支持多行输入，例如：下午把消防通道整改时间跟进一下，材料样板需要再确认一版。"></textarea>
+      <p class="sub">保存后的内容会进入「记事本待整理」，不再出现在首页。</p>
+      <div class="modal-actions">
+        <button class="primary-btn" id="wb-notepad-save" type="button">保存到记事本</button>
+        <button class="ghost-btn wb-modal-cancel" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工作台：AI助手 -->
+  <div class="modal-mask hidden" id="wb-ai-modal">
+    <div class="modal modal-wide">
+      <h3>AI助手</h3>
+      <p class="sub">选择常用 AI，复制初始指令，再把截图发给 AI 整理。</p>
+      <div id="wb-ai-body"></div>
+      <div class="modal-actions">
+        <button class="ghost-btn wb-modal-cancel" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工作台：任务详情 -->
+  <div class="modal-mask hidden" id="wb-task-modal">
+    <div class="modal modal-wide">
+      <div id="wb-task-body"></div>
+      <div class="modal-actions">
+        <button class="ghost-btn wb-modal-cancel" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工作台：项目详情 -->
+  <div class="modal-mask hidden" id="wb-project-modal">
+    <div class="modal modal-wide">
+      <div id="wb-project-body"></div>
+      <div class="modal-actions">
+        <button class="ghost-btn wb-modal-cancel" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工作台：新建项目 -->
+  <div class="modal-mask hidden" id="wb-new-project-modal">
+    <div class="modal">
+      <h3>新建项目</h3>
+      <label for="wb-new-project-name">项目名称</label>
+      <input type="text" id="wb-new-project-name" class="input-area" placeholder="例如：消防整改、新品发布">
+      <label for="wb-new-project-desc">项目说明（可选）</label>
+      <textarea id="wb-new-project-desc" class="input-area" rows="3" placeholder="这个项目主要做什么"></textarea>
+      <div class="modal-actions">
+        <button class="primary-btn" id="wb-new-project-save" type="button">创建项目</button>
+        <button class="ghost-btn wb-modal-cancel" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工作台：支持作者 -->
+  <div class="modal-mask hidden" id="wb-support-modal">
+    <div class="modal">
+      <h3>支持作者</h3>
+      <p class="sub">这是我从自己的工作流程中整理出来的小工具。如果它刚好帮你省了一点时间，欢迎自愿支持一下作者。</p>
+      <p class="sub">你可以把赞赏链接或收款码放在这里，当前版本展示占位文案。</p>
+      <div class="modal-actions">
+        <button class="ghost-btn wb-modal-cancel" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="wb-import-file" accept=".json,application/json" class="hidden">
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/mammoth.browser.min.js"></script>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/workbench.js"></script>
+</body>
+</html>
