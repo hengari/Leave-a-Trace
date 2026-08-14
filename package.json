@@ -1,7 +1,7 @@
 {
   "name": "liuhen-desktop",
   "productName": "留痕",
-  "version": "1.0.8",
+  "version": "1.0.12",
   "description": "留痕 · Leave a Trace 桌面版（纯本地工作记录 + 项目工作台）",
   "main": "electron/main.cjs",
   "author": "liuheng",
