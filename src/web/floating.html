@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>浮窗待办 · 留痕</title>
+  <link rel="stylesheet" href="css/floating.css">
+</head>
+<body>
+  <main class="floating-shell">
+    <header class="floating-head">
+      <div>
+        <p class="eyebrow">留痕 · 桌面同步</p>
+        <h1>浮窗待办 <span id="pending-total">0</span></h1>
+      </div>
+      <div class="window-actions">
+        <button id="open-main" type="button">打开主窗口</button>
+        <button id="hide-window" type="button">隐藏</button>
+      </div>
+    </header>
+
+    <section class="category-summary" role="radiogroup" aria-label="按事务分类筛选">
+      <button class="category-card active" type="button" role="radio" data-filter="work" aria-checked="true">
+        <span class="category-count" id="work-count">0</span>
+        <span class="category-label">工作事务</span>
+      </button>
+      <button class="category-card" type="button" role="radio" data-filter="life" aria-checked="false">
+        <span class="category-count" id="life-count">0</span>
+        <span class="category-label">生活事务</span>
+      </button>
+    </section>
+
+    <div class="list-head">
+      <span id="list-title">工作事务</span>
+      <button id="show-all" type="button">查看全部</button>
+    </div>
+    <section class="task-list" id="floating-task-list" aria-live="polite"></section>
+    <p class="floating-foot">新增、完成和修改会与主窗口即时同步</p>
+  </main>
+  <div class="resize-handle" id="resize-handle" aria-hidden="true"></div>
+  <script src="js/floating.js"></script>
+</body>
+</html>

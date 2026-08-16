@@ -9,6 +9,7 @@ const SERVER = location.protocol === "http:" || location.protocol === "https:";
 /* Electron 桌面端：通过 IPC 直连统一数据库 */
 const DESKTOP = !!(window.traceDesktop && window.traceDesktop.isDesktop);
 const REMOTE = SERVER || DESKTOP;
+const TASK_CATEGORIES = { work: "工作事务", life: "生活事务" };
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -24,6 +25,38 @@ function dateStr(d) {
 }
 
 function todayStr() { return dateStr(new Date()); }
+
+function taskCategory(task) {
+  return task && TASK_CATEGORIES[task.category] ? task.category : "work";
+}
+
+function categoryLabel(taskOrCategory) {
+  const value = typeof taskOrCategory === "string" ? taskOrCategory : taskCategory(taskOrCategory);
+  return TASK_CATEGORIES[value] || TASK_CATEGORIES.work;
+}
+
+function filterByCategory(tasks, category) {
+  return category === "all" ? tasks : tasks.filter((task) => taskCategory(task) === category);
+}
+
+function selectedTaskCategory() {
+  return TASK_CATEGORIES[state.settings.lastTaskCategory] ? state.settings.lastTaskCategory : "work";
+}
+
+function renderTaskCategoryPicker(tasks) {
+  const selected = selectedTaskCategory();
+  $$('[data-task-category]').forEach((button) => {
+    const category = button.dataset.taskCategory;
+    const active = category === selected;
+    const count = tasks.filter((task) => taskCategory(task) === category && task.status !== "done").length;
+    button.setAttribute("aria-checked", String(active));
+    button.tabIndex = active ? 0 : -1;
+    const countEl = button.querySelector(".task-category-count");
+    const selectedEl = button.querySelector(".task-category-selected");
+    if (countEl) countEl.textContent = String(count);
+    if (selectedEl) selectedEl.hidden = !active;
+  });
+}
 
 function parseDate(s) {
   const [y, m, d] = s.split("-").map(Number);
@@ -94,8 +127,24 @@ function toast(text, warn) {
   el._t = setTimeout(() => el.classList.remove("show"), 2400);
 }
 
+function formatFocusDuration(seconds, compact) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (compact) return hours ? hours + " 小时 " + minutes + " 分" : minutes + " 分";
+  const secs = total % 60;
+  return hours ? hours + ":" + pad(minutes) + ":" + pad(secs) : pad(minutes) + ":" + pad(secs);
+}
+
+function pomodoroEnabled() {
+  return !!(DESKTOP && state && state.settings && state.settings.pomodoroEnabled !== false);
+}
+
 /* ============ 存储层（输入即存，单出口） ============ */
 let state = null;
+let activeFocusSession = null;
+let focusTickTimer = null;
+let focusModalOpen = false;
 
 function emptyState() {
   return {
@@ -112,7 +161,9 @@ function emptyState() {
     settings: {
       gradientThresholdMin: 60,
       style: "paper",
-      backupReminderEnabled: true
+      backupReminderEnabled: true,
+      lastTaskCategory: "work",
+      pomodoroEnabled: true
     }
   };
 }
@@ -134,22 +185,22 @@ function demoState() {
       {
         id: uid("t"), text: "编写留痕项目方案", status: "in_progress",
         createdAt: new Date(now.getTime() - 2 * 3600000).toISOString(),
-        deadline: todayDeadline.toISOString(), completedAt: null, tags: ["方案"], note: "含热力图对标", order: 0
+        deadline: todayDeadline.toISOString(), completedAt: null, tags: ["方案"], note: "含热力图对标", category: "work", order: 0
       },
       {
         id: uid("t"), text: "晨会纪要", status: "done",
         createdAt: new Date(now.getTime() - 5 * 3600000).toISOString(),
-        deadline: null, completedAt: new Date(now.getTime() - 4 * 3600000).toISOString(), tags: [], note: "", order: 1
+        deadline: null, completedAt: new Date(now.getTime() - 4 * 3600000).toISOString(), tags: [], note: "", category: "work", order: 1
       },
       {
         id: uid("t"), text: "回复客户邮件", status: "pending",
         createdAt: new Date(now.getTime() - 6 * 3600000).toISOString(),
-        deadline: yesterdayOverdue.toISOString(), completedAt: null, tags: ["客户"], note: "", order: 2
+        deadline: yesterdayOverdue.toISOString(), completedAt: null, tags: ["客户"], note: "", category: "work", order: 2
       },
       {
         id: uid("t"), text: "整理本周报表", status: "in_progress",
         createdAt: new Date(now.getTime() - 1 * 3600000).toISOString(),
-        deadline: nearDeadline.toISOString(), completedAt: null, tags: [], note: "", order: 3
+        deadline: nearDeadline.toISOString(), completedAt: null, tags: [], note: "", category: "work", order: 3
       }
     ],
     checkIn: null
@@ -159,12 +210,12 @@ function demoState() {
       {
         id: uid("t"), text: "周报撰写", status: "done",
         createdAt: new Date(now.getTime() - DAY_MS - 3 * 3600000).toISOString(),
-        deadline: null, completedAt: new Date(now.getTime() - DAY_MS - 1 * 3600000).toISOString(), tags: [], note: "", order: 0
+        deadline: null, completedAt: new Date(now.getTime() - DAY_MS - 1 * 3600000).toISOString(), tags: [], note: "", category: "work", order: 0
       },
       {
         id: uid("t"), text: "需求评审", status: "done",
         createdAt: new Date(now.getTime() - DAY_MS - 5 * 3600000).toISOString(),
-        deadline: null, completedAt: new Date(now.getTime() - DAY_MS - 2 * 3600000).toISOString(), tags: [], note: "", order: 1
+        deadline: null, completedAt: new Date(now.getTime() - DAY_MS - 2 * 3600000).toISOString(), tags: [], note: "", category: "work", order: 1
       }
     ],
     checkIn: { checked: true, checkedAt: new Date(now.getTime() - DAY_MS - 3 * 3600000).toISOString() }
@@ -174,12 +225,12 @@ function demoState() {
       {
         id: uid("t"), text: "阅读《深度工作》第 3 章", status: "done",
         createdAt: new Date(now.getTime() - 2 * DAY_MS - 4 * 3600000).toISOString(),
-        deadline: null, completedAt: new Date(now.getTime() - 2 * DAY_MS - 2 * 3600000).toISOString(), tags: [], note: "", order: 0
+        deadline: null, completedAt: new Date(now.getTime() - 2 * DAY_MS - 2 * 3600000).toISOString(), tags: [], note: "", category: "life", order: 0
       },
       {
         id: uid("t"), text: "整理读书笔记", status: "pending",
         createdAt: new Date(now.getTime() - 2 * DAY_MS - 2 * 3600000).toISOString(),
-        deadline: null, completedAt: null, tags: [], note: "", order: 1
+        deadline: null, completedAt: null, tags: [], note: "", category: "life", order: 1
       }
     ],
     checkIn: null
@@ -193,7 +244,8 @@ function demoState() {
   ];
   const savedStyle = localStorage.getItem("trace:style")
     || (localStorage.getItem("trace:theme") === "dark" ? "dark" : "paper");
-  st.settings.style = savedStyle;
+  // 旧版「现代克制」已下线，映射为「暖光日记」
+  st.settings.style = savedStyle === "modern" ? "warm" : savedStyle;
   return st;
 }
 
@@ -368,6 +420,22 @@ function normalize(data) {
   if (!merged.settings.style) {
     merged.settings.style = merged.settings.theme === "dark" ? "dark" : "paper";
   }
+  if (!TASK_CATEGORIES[merged.settings.lastTaskCategory]) {
+    merged.settings.lastTaskCategory = "work";
+  }
+  if (typeof merged.settings.pomodoroEnabled !== "boolean") merged.settings.pomodoroEnabled = true;
+  Object.keys(merged.days).forEach((date) => {
+    const day = merged.days[date] || {};
+    day.focusSeconds = Math.max(0, Number(day.focusSeconds) || 0);
+    day.tasks = Array.isArray(day.tasks) ? day.tasks.map((task) => Object.assign({}, task, {
+      category: taskCategory(task),
+      note: typeof task.note === "string" ? task.note : "",
+      focusSeconds: Math.max(0, Number(task.focusSeconds) || 0),
+      updatedAt: task.updatedAt || task.createdAt || new Date().toISOString()
+    })) : [];
+    if (!("checkIn" in day)) day.checkIn = null;
+    merged.days[date] = day;
+  });
   return merged;
 }
 
@@ -383,8 +451,12 @@ function quarantineCorrupt(msg) {
 
 /* ============ 主题 ============ */
 function applyTheme(style) {
+  if (style === "modern") style = "warm";
   document.documentElement.dataset.theme = style;
-  $("#theme-toggle").textContent = style === "dark" ? "☀" : "☾";
+  const icon = $("#theme-icon");
+  if (icon) icon.textContent = style === "warm" ? "☀" : "☾";
+  const name = $("#theme-name");
+  if (name) name.textContent = style === "dark" ? "极夜" : (style === "warm" ? "晴空" : "暖阳");
   const sel = $("#theme-select");
   if (sel) sel.value = style;
   try { localStorage.setItem("trace:style", style); } catch (err) {}
@@ -414,6 +486,7 @@ function renderRoute() {
 
 /* ============ 今日页 ============ */
 let cursorDate = todayStr();
+let todayCategoryFilter = "all";
 
 function dayTasks(date) {
   const own = (state.days[date] && state.days[date].tasks) || [];
@@ -440,7 +513,8 @@ function taskActiveOn(task, date) {
 }
 
 function ensureDay(date) {
-  if (!state.days[date]) state.days[date] = { tasks: [], checkIn: null };
+  if (!state.days[date]) state.days[date] = { tasks: [], checkIn: null, focusSeconds: 0 };
+  if (!Number.isFinite(Number(state.days[date].focusSeconds))) state.days[date].focusSeconds = 0;
   return state.days[date];
 }
 
@@ -448,15 +522,126 @@ function isOverdue(task) {
   return task.status !== "done" && task.deadline && new Date(task.deadline).getTime() < Date.now() && !task.givenUp;
 }
 
+function focusElapsedSeconds(session) {
+  if (!session) return 0;
+  const base = Math.max(0, Number(session.accumulatedMs) || 0);
+  const live = session.paused ? 0 : Math.max(0, Date.now() - Number(session.startedAt || Date.now()));
+  return Math.floor((base + live) / 1000);
+}
+
+function updateFocusModal() {
+  const modal = $("#focus-modal");
+  if (!modal) return;
+  if (!activeFocusSession || !focusModalOpen) {
+    modal.classList.add("hidden");
+    clearInterval(focusTickTimer);
+    focusTickTimer = null;
+    return;
+  }
+  modal.classList.remove("hidden");
+  $("#focus-modal-title").textContent = activeFocusSession.title || "当前任务";
+  $("#focus-task-meta").textContent = categoryLabel(activeFocusSession.category) + (activeFocusSession.paused ? " · 已暂停" : " · 正在专注");
+  const seconds = focusElapsedSeconds(activeFocusSession);
+  $("#focus-ring-time").textContent = formatFocusDuration(seconds, false);
+  const circumference = 2 * Math.PI * 64;
+  const progress = (seconds % (25 * 60)) / (25 * 60);
+  const ring = $("#focus-ring-progress");
+  ring.style.strokeDasharray = String(circumference);
+  ring.style.strokeDashoffset = String(circumference * (1 - progress));
+  $("#focus-pause").textContent = activeFocusSession.paused ? "继续" : "暂停";
+}
+
+function showFocusModal() {
+  focusModalOpen = true;
+  updateFocusModal();
+  if (!focusTickTimer) focusTickTimer = setInterval(updateFocusModal, 1000);
+}
+
+function closeFocusModal() {
+  focusModalOpen = false;
+  updateFocusModal();
+}
+
+async function refreshDesktopState() {
+  const remote = await apiGetState();
+  if (!remote || !remote.meta || !remote.days) return;
+  state = normalize(remote);
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (err) { /* 仅缓存 */ }
+  renderRoute();
+}
+
+async function openFocusModal(task) {
+  if (!DESKTOP || !pomodoroEnabled()) return;
+  const key = "trace:" + task.id;
+  if (activeFocusSession) {
+    if (activeFocusSession.key === key) showFocusModal();
+    else toast("正在专注：“" + activeFocusSession.title + "”", true);
+    return;
+  }
+  const result = await window.traceDesktop.focusStart({
+    source: "trace",
+    taskId: task.id,
+    title: task.text,
+    category: taskCategory(task)
+  });
+  if (!result || !result.ok) {
+    toast((result && result.error) || "无法开始专注", true);
+    return;
+  }
+  activeFocusSession = result.active;
+  showFocusModal();
+  renderToday();
+}
+
+async function toggleFocusPause() {
+  if (!activeFocusSession) return;
+  const result = await window.traceDesktop.focusPause({ paused: !activeFocusSession.paused });
+  if (!result || !result.ok) return toast((result && result.error) || "操作失败", true);
+  activeFocusSession = result.active;
+  updateFocusModal();
+}
+
+async function finishFocus(cancel) {
+  if (!activeFocusSession) return;
+  const result = await window.traceDesktop.focusStop({ cancel: !!cancel });
+  if (!result || !result.ok) {
+    toast((result && result.error) || "专注结算失败", true);
+    return;
+  }
+  activeFocusSession = null;
+  closeFocusModal();
+  await refreshDesktopState();
+  if (cancel) toast("本次专注已取消，未计入时长");
+  else toast([result.message, result.milestone].filter(Boolean).join(" · "));
+}
+
+function renderTodayFocus() {
+  const el = $("#today-focus-stat");
+  if (!el) return;
+  const enabled = pomodoroEnabled();
+  el.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+  const seconds = Number(ensureDay(cursorDate).focusSeconds) || 0;
+  el.textContent = (cursorDate === todayStr() ? "今日专注 " : "当日专注 ") + formatFocusDuration(seconds, true);
+}
+
 function renderToday() {
   const d = parseDate(cursorDate);
   $("#day-title").textContent = (d.getMonth() + 1) + "月" + d.getDate() + "日 星期" + weekdayCN(d);
-  $("#day-sub").textContent = (cursorDate === todayStr() ? "今天" : "历史记录") + " · " + dayTasks(cursorDate).length + " 项任务";
+  const allDayTasks = dayTasks(cursorDate).slice().sort((a, b) => a.order - b.order);
+  const tasks = filterByCategory(allDayTasks, todayCategoryFilter);
+  const scopeLabel = todayCategoryFilter === "all" ? "全部事务" : categoryLabel(todayCategoryFilter);
+  $("#day-sub").textContent = (cursorDate === todayStr() ? "今天" : "历史记录") + " · " + scopeLabel + " " + tasks.length + " 项";
 
   $("#write-banner").classList.toggle("hidden", cursorDate === todayStr());
   $("#today-btn").classList.toggle("hidden", cursorDate === todayStr());
-
-  const tasks = dayTasks(cursorDate).slice().sort((a, b) => a.order - b.order);
+  renderTaskCategoryPicker(allDayTasks);
+  $$('[data-task-category-filter]').forEach((button) => {
+    const category = button.dataset.taskCategoryFilter;
+    const count = filterByCategory(allDayTasks, category).length;
+    button.classList.toggle("active", category === todayCategoryFilter);
+    button.textContent = (category === "all" ? "全部" : categoryLabel(category)) + " " + count;
+  });
   const followup = tasks.filter(isOverdue);
   const others = tasks.filter((t) => !isOverdue(t));
 
@@ -475,6 +660,7 @@ function renderToday() {
   renderTaskList($("#followup-list"), followup, true);
 
   $("#task-count").textContent = others.length + " 项";
+  renderTodayFocus();
   renderTaskList($("#task-list"), others, false);
   $("#empty-hint").classList.toggle("hidden", others.length > 0);
 
@@ -551,6 +737,17 @@ function taskRow(task, followup, interactive) {
 
   const meta = document.createElement("div");
   meta.className = "task-meta";
+  const category = document.createElement("button");
+  category.type = "button";
+  category.className = "task-category task-category-" + taskCategory(task);
+  category.textContent = categoryLabel(task);
+  category.title = "点击切换任务分类";
+  if (interactive) category.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setTaskCategory(task.id, taskCategory(task) === "work" ? "life" : "work");
+  });
+  else category.disabled = true;
+  meta.appendChild(category);
   if (task.tags && task.tags.length) {
     const tag = document.createElement("span");
     tag.textContent = "#" + task.tags.join(" #");
@@ -558,8 +755,16 @@ function taskRow(task, followup, interactive) {
   }
   if (task.note) {
     const note = document.createElement("span");
-    note.textContent = task.note;
+    note.className = "task-note-preview";
+    note.textContent = "备注：" + (task.note.length > 40 ? task.note.slice(0, 40) + "…" : task.note);
+    note.title = task.note;
     meta.appendChild(note);
+  }
+  if (Number(task.focusSeconds) > 0) {
+    const focused = document.createElement("span");
+    focused.className = "task-focus-total";
+    focused.textContent = "已专注 " + formatFocusDuration(task.focusSeconds, true);
+    meta.appendChild(focused);
   }
 
   const chip = document.createElement("button");
@@ -611,6 +816,27 @@ function taskRow(task, followup, interactive) {
       });
       actions.appendChild(giveUp);
     }
+    if (pomodoroEnabled() && task.status !== "done") {
+      const focus = document.createElement("button");
+      const focusing = activeFocusSession && activeFocusSession.key === "trace:" + task.id;
+      focus.textContent = focusing ? "专注中" : "⏱ 专注";
+      focus.className = "focus-task-btn" + (focusing ? " active" : "");
+      focus.disabled = !!activeFocusSession;
+      focus.title = focusing ? "当前任务正在专注" : activeFocusSession ? "请先结束当前专注" : "开始专注计时";
+      focus.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openFocusModal(task);
+      });
+      actions.appendChild(focus);
+    }
+    const noteBtn = document.createElement("button");
+    noteBtn.textContent = task.note ? "编辑备注" : "备注";
+    noteBtn.className = task.note ? "has-note" : "";
+    noteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openTaskNote(task.id);
+    });
+    actions.appendChild(noteBtn);
     const del = document.createElement("button");
     del.textContent = "删除";
     del.className = "danger";
@@ -829,9 +1055,9 @@ function renderDeadlineCalendar() {
 }
 
 const RANGE_BASE = {
-  paper: "#e8590c",  // 默认纸感：暖橙色调
-  dark: "#4dabf7",   // 深色：冷蓝色调
-  modern: "#4f46e5"  // 现代：靛蓝（冷）
+  paper: "#b8863c", // 暖阳：深香槟金
+  dark: "#34d399",  // 极夜：冷绿
+  warm: "#3d8bd4"   // 晴空：浅蓝
 };
 
 function rangeBase() {
@@ -883,9 +1109,11 @@ function addTask() {
   const task = {
     id: uid("t"), text: text, status: "in_progress",
     createdAt: new Date().toISOString(), deadline: deadline, completedAt: null,
-    tags: [], note: "", order: order
+    tags: [], note: "", category: selectedTaskCategory(),
+    focusSeconds: 0, updatedAt: new Date().toISOString(), order: order
   };
   day.tasks.push(task);
+  state.settings.lastTaskCategory = task.category;
   save();
   input.value = "";
   renderToday();
@@ -895,6 +1123,59 @@ function addTask() {
     setTimeout(() => row.classList.remove("entering"), 300);
   }
   toast("已添加并保存");
+}
+
+let selectedNoteTaskId = null;
+
+function openTaskNote(id) {
+  const task = findTask(id);
+  if (!task) return;
+  selectedNoteTaskId = id;
+  $("#task-note-title").textContent = categoryLabel(task) + " · " + task.text;
+  $("#task-note-input").value = task.note || "";
+  $("#task-note-modal").classList.remove("hidden");
+  setTimeout(() => $("#task-note-input").focus(), 0);
+}
+
+function closeTaskNote() {
+  selectedNoteTaskId = null;
+  $("#task-note-modal").classList.add("hidden");
+}
+
+function saveTaskNote() {
+  const task = findTask(selectedNoteTaskId);
+  if (!task) return closeTaskNote();
+  task.note = $("#task-note-input").value.trim();
+  task.updatedAt = new Date().toISOString();
+  save();
+  closeTaskNote();
+  renderToday();
+  toast(task.note ? "备注已保存" : "备注已清空");
+}
+
+function setTaskCategory(id, category) {
+  const task = findTask(id);
+  if (!task || !TASK_CATEGORIES[category]) return;
+  task.category = category;
+  task.updatedAt = new Date().toISOString();
+  save();
+  renderToday();
+  toast("已归入" + categoryLabel(category));
+}
+
+function clearTaskNote() {
+  $("#task-note-input").value = "";
+  saveTaskNote();
+}
+
+function todayAllDone() {
+  const tasks = dayTasks(todayStr()).filter((task) => !task.givenUp);
+  return tasks.length > 0 && tasks.every((task) => task.status === "done");
+}
+
+function celebrateAllDone() {
+  celebrate();
+  toast("今日全部完成，留痕纪念 🎉");
 }
 
 function toggleDone(id) {
@@ -914,6 +1195,7 @@ function toggleDone(id) {
     row.classList.add("done");
     setTimeout(() => row.classList.remove("done"), 650);
   }
+  if (task.status === "done" && cursorDate === todayStr() && todayAllDone()) celebrateAllDone();
 }
 
 function cycleStatus(id) {
@@ -925,6 +1207,8 @@ function cycleStatus(id) {
 }
 
 function removeTask(id) {
+  const task = findTask(id);
+  if (!task || !window.confirm("确认删除任务“" + task.text + "”？备注也会一并删除。")) return;
   let removed = false;
   Object.keys(state.days).forEach((d) => {
     const before = (state.days[d].tasks || []).length;
@@ -1077,6 +1361,7 @@ let monthCursor = (function () {
   const d = new Date();
   return d.getFullYear() + "-" + pad(d.getMonth() + 1);
 })();
+let monthCategoryFilter = "all";
 
 function monthDays(ym) {
   const [y, m] = ym.split("-").map(Number);
@@ -1114,7 +1399,7 @@ function renderMonthlyHeatmaps() {
   const y = Number(monthCursor.split("-")[0]);
   for (let m = 1; m <= 12; m++) {
     const ym = y + "-" + pad(m);
-    const tasks = monthTasks(ym);
+    const tasks = filterByCategory(monthTasks(ym), monthCategoryFilter);
     const done = tasks.filter((t) => t.status === "done").length;
     const rate = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
     const block = document.createElement("div");
@@ -1134,13 +1419,15 @@ function renderMonthlyHeatmaps() {
     for (let d = 1; d <= dayCount; d++) {
       const key = ym + "-" + pad(d);
       const day = state.days[key];
-      const arr = day ? day.tasks || [] : [];
+      const arr = filterByCategory(day ? day.tasks || [] : [], monthCategoryFilter);
       const dd = arr.filter((t) => t.status === "done").length;
+      const focusSeconds = Math.max(0, Number(day && day.focusSeconds) || 0);
       const cell = document.createElement("button");
       cell.type = "button";
       cell.className = "hm-cell lv-" + heatLevel(arr.length ? Math.round((dd / arr.length) * 100) : 0);
+      if (focusSeconds > 0) cell.classList.add("has-focus");
       cell.textContent = d;
-      cell.title = key + " · " + dd + "/" + arr.length + " 完成";
+      cell.title = key + " · " + dd + "/" + arr.length + " 完成" + (focusSeconds ? " · 专注 " + formatFocusDuration(focusSeconds, true) : "");
       cell.addEventListener("click", () => {
         cursorDate = key;
         location.hash = "#today";
@@ -1151,20 +1438,24 @@ function renderMonthlyHeatmaps() {
     wrap.appendChild(block);
   }
   const count = $("#monthly-heatmap-count");
-  if (count) count.textContent = "12 个月";
+  if (count) count.textContent = "12 个月 · " + (monthCategoryFilter === "all" ? "全部事务" : categoryLabel(monthCategoryFilter));
 }
 
 function buildMonthlyMD(ym) {
   const [y, m] = ym.split("-").map(Number);
   const tasks = monthTasks(ym);
   const total = tasks.length;
+  const workTotal = tasks.filter((t) => taskCategory(t) === "work").length;
+  const lifeTotal = tasks.filter((t) => taskCategory(t) === "life").length;
   const done = tasks.filter((t) => t.status === "done").length;
   const doing = tasks.filter((t) => t.status === "in_progress").length;
   const pending = tasks.filter((t) => t.status === "pending").length;
   const overdue = tasks.filter((t) => isOverdue(t)).length;
   let checkinDays = 0;
+  let monthFocusSeconds = 0;
   Object.keys(state.days).forEach((d) => {
     if (d.startsWith(ym) && state.days[d].checkIn && state.days[d].checkIn.checked) checkinDays++;
+    if (d.startsWith(ym)) monthFocusSeconds += Math.max(0, Number(state.days[d].focusSeconds) || 0);
   });
   const rate = total ? Math.round((done / total) * 100) : 0;
   const lines = [];
@@ -1175,12 +1466,15 @@ function buildMonthlyMD(ym) {
   lines.push("| 指标 | 数值 |");
   lines.push("|---|---|");
   lines.push("| 任务总数 | " + total + " |");
+  lines.push("| 工作事务 | " + workTotal + " |");
+  lines.push("| 生活事务 | " + lifeTotal + " |");
   lines.push("| 已完成 | " + done + " / " + total + " |");
   lines.push("| 完成率 | " + rate + "% |");
   lines.push("| 进行中 | " + doing + " |");
   lines.push("| 未完成 | " + pending + " |");
   lines.push("| 完成天数 | " + checkinDays + " 天 |");
   lines.push("| 逾期任务 | " + overdue + " |");
+  lines.push("| 专注时长 | " + formatFocusDuration(monthFocusSeconds, true) + " |");
   lines.push("");
   lines.push("## 按日明细");
   lines.push("");
@@ -1188,16 +1482,22 @@ function buildMonthlyMD(ym) {
   for (let d = 1; d <= dayCount; d++) {
     const key = ym + "-" + pad(d);
     const day = state.days[key];
-    if (!day || !day.tasks || !day.tasks.length) continue;
+    if (!day || ((!day.tasks || !day.tasks.length) && !Number(day.focusSeconds))) continue;
     const dd = new Date(y, m - 1, d);
     lines.push("### " + key + " 周" + "日一二三四五六"[dd.getDay()]);
-    day.tasks.slice().sort((a, b) => a.order - b.order).forEach((t) => {
-      const mark = t.status === "done" ? "✓" : t.status === "in_progress" ? "●" : "◌";
-      const parts = [];
-      if (t.deadline) parts.push("截止 " + fmtClock(t.deadline));
-      if (t.tags && t.tags.length) parts.push("#" + t.tags.join(" #"));
-      if (t.note) parts.push(t.note);
-      lines.push("- " + mark + " " + t.text + (parts.length ? "（" + parts.join("｜") + "）" : ""));
+    if (Number(day.focusSeconds) > 0) lines.push("- 专注 " + formatFocusDuration(day.focusSeconds, true));
+    ["work", "life"].forEach((category) => {
+      const categoryTasks = (day.tasks || []).filter((t) => taskCategory(t) === category).sort((a, b) => a.order - b.order);
+      if (!categoryTasks.length) return;
+      lines.push("#### " + categoryLabel(category));
+      categoryTasks.forEach((t) => {
+        const mark = t.status === "done" ? "✓" : t.status === "in_progress" ? "●" : "◌";
+        const parts = [];
+        if (t.deadline) parts.push("截止 " + fmtClock(t.deadline));
+        if (t.tags && t.tags.length) parts.push("#" + t.tags.join(" #"));
+        if (t.note) parts.push("备注：" + t.note);
+        lines.push("- " + mark + " " + t.text + (parts.length ? "（" + parts.join("｜") + "）" : ""));
+      });
     });
     lines.push("");
   }
@@ -1207,7 +1507,7 @@ function buildMonthlyMD(ym) {
     lines.push("");
     followup.forEach((t) => {
       const span = isOverdue(t) ? " · 逾期 " + overdueHours(t) + " 小时" : "";
-      lines.push("- " + t.text + "（" + t.date + "）" + span);
+      lines.push("- 【" + categoryLabel(t) + "】" + t.text + "（" + t.date + "）" + span);
     });
     lines.push("");
   }
@@ -1221,29 +1521,42 @@ function buildMonthlyMD(ym) {
 function renderMonthly() {
   const ym = monthCursor;
   const [y, m] = ym.split("-").map(Number);
-  const tasks = monthTasks(ym);
+  const allMonthTasks = monthTasks(ym);
+  const tasks = filterByCategory(allMonthTasks, monthCategoryFilter);
   const total = tasks.length;
+  const workTotal = allMonthTasks.filter((t) => taskCategory(t) === "work").length;
+  const lifeTotal = allMonthTasks.filter((t) => taskCategory(t) === "life").length;
   const done = tasks.filter((t) => t.status === "done").length;
   const doing = tasks.filter((t) => t.status === "in_progress").length;
   const pending = tasks.filter((t) => t.status === "pending").length;
   const overdue = tasks.filter((t) => isOverdue(t)).length;
   let checkinDays = 0;
+  let monthFocusSeconds = 0;
   Object.keys(state.days).forEach((d) => {
     if (d.startsWith(ym) && state.days[d].checkIn && state.days[d].checkIn.checked) checkinDays++;
+    if (d.startsWith(ym)) monthFocusSeconds += Math.max(0, Number(state.days[d].focusSeconds) || 0);
   });
   const rate = total ? Math.round((done / total) * 100) : 0;
 
   $("#month-input").value = ym;
+  $$('[data-month-category-filter]').forEach((button) => {
+    const category = button.dataset.monthCategoryFilter;
+    button.classList.toggle("active", category === monthCategoryFilter);
+    const count = filterByCategory(allMonthTasks, category).length;
+    button.textContent = (category === "all" ? "全部" : categoryLabel(category)) + " " + count;
+  });
   const wrap = $("#monthly-metrics");
   wrap.textContent = "";
   [
-    { num: total, label: "任务总数" },
+    { num: workTotal, label: "工作事务" },
+    { num: lifeTotal, label: "生活事务" },
+    { num: total, label: monthCategoryFilter === "all" ? "任务总数" : "当前分类" },
     { num: done + " / " + total, label: "已完成" },
+    { num: (doing + pending), label: "未完成" },
     { num: rate + "%", label: "完成率" },
-    { num: doing, label: "进行中" },
-    { num: pending, label: "未完成" },
     { num: checkinDays + " 天", label: "完成天数" },
-    { num: overdue, label: "逾期任务" }
+    { num: overdue, label: "逾期任务" },
+    { num: formatFocusDuration(monthFocusSeconds, true), label: "专注时长" }
   ].forEach((it) => {
     const box = document.createElement("div");
     box.className = "metric";
@@ -1269,26 +1582,45 @@ function renderMonthly() {
   for (let d = 1; d <= dayCount; d++) {
     const key = ym + "-" + pad(d);
     const day = state.days[key];
-    if (!day || !day.tasks || !day.tasks.length) continue;
+    const visibleTasks = filterByCategory(day && day.tasks ? day.tasks : [], monthCategoryFilter);
+    const dayFocusSeconds = Math.max(0, Number(day && day.focusSeconds) || 0);
+    if (!visibleTasks.length && !dayFocusSeconds) continue;
     dayCountWithTasks++;
     const dd = new Date(y, m - 1, d);
     const head = document.createElement("h4");
     head.className = "month-day-title";
     head.textContent = key + " 周" + "日一二三四五六"[dd.getDay()];
-    const ul = document.createElement("ul");
-    ul.className = "month-day-list";
-    day.tasks.slice().sort((a, b) => a.order - b.order).forEach((t) => {
-      const li = document.createElement("li");
-      li.className = "status-" + t.status;
-      const mark = t.status === "done" ? "✓" : t.status === "in_progress" ? "●" : "◌";
-      const parts = [];
-      if (t.deadline) parts.push("截止 " + fmtClock(t.deadline));
-      if (t.tags && t.tags.length) parts.push("#" + t.tags.join(" #"));
-      if (t.note) parts.push(t.note);
-      li.textContent = mark + " " + t.text + (parts.length ? "（" + parts.join("｜") + "）" : "");
-      ul.appendChild(li);
+    daysBox.appendChild(head);
+    if (dayFocusSeconds) {
+      const focus = document.createElement("div");
+      focus.className = "month-day-focus";
+      focus.textContent = "专注 " + formatFocusDuration(dayFocusSeconds, true);
+      daysBox.appendChild(focus);
+    }
+    ["work", "life"].forEach((category) => {
+      const categoryTasks = visibleTasks.filter((t) => taskCategory(t) === category).sort((a, b) => a.order - b.order);
+      if (!categoryTasks.length) return;
+      const group = document.createElement("div");
+      group.className = "month-category-group";
+      const groupTitle = document.createElement("div");
+      groupTitle.className = "month-category-title task-category-" + category;
+      groupTitle.textContent = categoryLabel(category) + " · " + categoryTasks.length;
+      const ul = document.createElement("ul");
+      ul.className = "month-day-list";
+      categoryTasks.forEach((t) => {
+        const li = document.createElement("li");
+        li.className = "status-" + t.status;
+        const mark = t.status === "done" ? "✓" : t.status === "in_progress" ? "●" : "◌";
+        const parts = [];
+        if (t.deadline) parts.push("截止 " + fmtClock(t.deadline));
+        if (t.tags && t.tags.length) parts.push("#" + t.tags.join(" #"));
+        if (t.note) parts.push("备注：" + t.note);
+        li.textContent = mark + " " + t.text + (parts.length ? "（" + parts.join("｜") + "）" : "");
+        ul.appendChild(li);
+      });
+      group.append(groupTitle, ul);
+      daysBox.appendChild(group);
     });
-    daysBox.append(head, ul);
   }
   $("#monthly-day-count").textContent = dayCountWithTasks + " 天";
   if (!dayCountWithTasks) {
@@ -1314,7 +1646,7 @@ function renderMonthly() {
     li.className = "followup-item" + (isOverdue(t) ? " overdue" : "");
     const mark = t.status === "in_progress" ? "●" : "◌";
     const span = isOverdue(t) ? " · 已逾期 " + overdueHours(t) + " 小时 · 需跟进" : "";
-    li.textContent = mark + " " + t.text + "（" + t.date + "）" + span;
+    li.textContent = mark + " 【" + categoryLabel(t) + "】" + t.text + "（" + t.date + "）" + span;
     li.title = t.text;
     fu.appendChild(li);
   });
@@ -1439,6 +1771,8 @@ function monthlyReportHTML(ym) {
   const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const tasks = monthTasks(ym);
   const total = tasks.length;
+  const workTotal = tasks.filter((t) => taskCategory(t) === "work").length;
+  const lifeTotal = tasks.filter((t) => taskCategory(t) === "life").length;
   const done = tasks.filter((t) => t.status === "done").length;
   let checkinDays = 0;
   Object.keys(state.days).forEach((d) => {
@@ -1452,24 +1786,28 @@ function monthlyReportHTML(ym) {
     const day = state.days[key];
     if (!day || !day.tasks || !day.tasks.length) continue;
     const dd = new Date(y, m - 1, d);
-    const items = day.tasks.slice().sort((a, b) => a.order - b.order).map((t) => {
-      const mark = t.status === "done" ? "&#10003;" : t.status === "in_progress" ? "&#9679;" : "&#9675;";
-      const parts = [];
-      if (t.deadline) parts.push("截止 " + fmtClock(t.deadline));
-      if (t.tags && t.tags.length) parts.push("#" + t.tags.join(" #"));
-      if (t.note) parts.push(escHtml(t.note));
-      return "<li>" + mark + " " + escHtml(t.text) + (parts.length ? "（" + parts.join("｜") + "）" : "") + "</li>";
-    }).join("");
-    daysHtml += "<h3>" + key + " 周" + "日一二三四五六"[dd.getDay()] + "</h3><ul>" + items + "</ul>";
+    let groupsHtml = "";
+    ["work", "life"].forEach((category) => {
+      const items = day.tasks.filter((t) => taskCategory(t) === category).sort((a, b) => a.order - b.order).map((t) => {
+        const mark = t.status === "done" ? "&#10003;" : t.status === "in_progress" ? "&#9679;" : "&#9675;";
+        const parts = [];
+        if (t.deadline) parts.push("截止 " + fmtClock(t.deadline));
+        if (t.tags && t.tags.length) parts.push("#" + t.tags.join(" #"));
+        if (t.note) parts.push("备注：" + escHtml(t.note));
+        return "<li>" + mark + " " + escHtml(t.text) + (parts.length ? "（" + parts.join("｜") + "）" : "") + "</li>";
+      }).join("");
+      if (items) groupsHtml += "<h4>" + categoryLabel(category) + "</h4><ul>" + items + "</ul>";
+    });
+    daysHtml += "<h3>" + key + " 周" + "日一二三四五六"[dd.getDay()] + "</h3>" + groupsHtml;
   }
   return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>" + y + " 年 " + m + " 月工作汇总 · 留痕</title><style>"
     + "body{font-family:'PingFang SC','Microsoft YaHei UI',system-ui,sans-serif;color:#23262b;max-width:720px;margin:24px auto;padding:0 16px;line-height:1.7}"
-    + "h1{font-size:22px}h2{font-size:17px;border-bottom:1px solid #e5e1d7;padding-bottom:4px}h3{font-size:14px;margin:16px 0 6px}ul{margin:4px 0 12px;padding-left:22px}li{margin:2px 0;font-size:13px}"
+    + "h1{font-size:22px}h2{font-size:17px;border-bottom:1px solid #e5e1d7;padding-bottom:4px}h3{font-size:14px;margin:16px 0 6px}h4{font-size:12px;color:#287c62;margin:8px 0 2px}ul{margin:4px 0 12px;padding-left:22px}li{margin:2px 0;font-size:13px}"
     + "table{border-collapse:collapse;font-size:13px}td,th{border:1px solid #d4cfc2;padding:5px 12px}@media print{body{margin:12mm auto}}"
     + "</style></head><body>"
     + "<h1>" + y + " 年 " + m + " 月工作汇总 · 留痕</h1>"
-    + "<table><tr><th>任务总数</th><th>已完成</th><th>完成率</th><th>完成天数</th></tr>"
-    + "<tr><td>" + total + "</td><td>" + done + " / " + total + "</td><td>" + rate + "%</td><td>" + checkinDays + " 天</td></tr></table>"
+    + "<table><tr><th>任务总数</th><th>工作事务</th><th>生活事务</th><th>已完成</th><th>完成率</th><th>完成天数</th></tr>"
+    + "<tr><td>" + total + "</td><td>" + workTotal + "</td><td>" + lifeTotal + "</td><td>" + done + " / " + total + "</td><td>" + rate + "%</td><td>" + checkinDays + " 天</td></tr></table>"
     + "<h2>按日明细</h2>" + (daysHtml || "<p>该月暂无任务记录。</p>")
     + "<p style=\"color:#7a7d84;font-size:12px\">生成时间：" + fmtDateTime(new Date().toISOString()) + " · 数据版本 trace:v1</p>"
     + "</body></html>";
@@ -2008,6 +2346,7 @@ function renderSettings() {
   $("#theme-select").value = state.settings.style || "paper";
   $("#threshold-input").value = state.settings.gradientThresholdMin;
   $("#reminder-toggle").checked = !!state.settings.backupReminderEnabled;
+  $("#pomodoro-toggle").checked = state.settings.pomodoroEnabled !== false;
 }
 
 function clearDemo() {
@@ -2030,18 +2369,62 @@ function restoreDemo() {
 function bind() {
   window.addEventListener("hashchange", renderRoute);
 
-  $("#theme-toggle").addEventListener("click", () => {
-    const cur = state.settings.style || "paper";
-    const next = cur === "paper" ? "dark" : "paper";
-    state.settings.style = next;
-    applyTheme(next);
-    save();
-  });
+  const winMinimize = $("#win-minimize");
+  const winMaximize = $("#win-maximize");
+  const winClose = $("#win-close");
+  if (winMinimize && window.traceDesktop && window.traceDesktop.minimizeWindow) {
+    winMinimize.addEventListener("click", () => window.traceDesktop.minimizeWindow());
+  }
+  if (winMaximize && window.traceDesktop && window.traceDesktop.toggleMaximize) {
+    winMaximize.addEventListener("click", () => window.traceDesktop.toggleMaximize());
+  }
+  if (winClose && window.traceDesktop && window.traceDesktop.closeWindow) {
+    winClose.addEventListener("click", () => window.traceDesktop.closeWindow());
+  }
 
   $("#add-form").addEventListener("submit", (e) => {
     e.preventDefault();
     addTask();
   });
+  $$('[data-task-category-filter]').forEach((button) => {
+    button.addEventListener("click", () => {
+      todayCategoryFilter = button.dataset.taskCategoryFilter;
+      renderToday();
+    });
+  });
+  $$('[data-task-category]').forEach((button) => {
+    button.addEventListener("click", () => {
+      state.settings.lastTaskCategory = TASK_CATEGORIES[button.dataset.taskCategory] ? button.dataset.taskCategory : "work";
+      save();
+      renderTaskCategoryPicker(dayTasks(cursorDate));
+      $("#task-input").focus();
+    });
+    button.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const next = button.dataset.taskCategory === "work" ? "life" : "work";
+      const target = document.querySelector('[data-task-category="' + next + '"]');
+      if (target) target.click();
+    });
+  });
+
+  const floatingToggle = $("#floating-toggle");
+  if (floatingToggle) {
+    if (!DESKTOP) floatingToggle.classList.add("hidden");
+    else floatingToggle.addEventListener("click", async () => {
+      const result = await window.traceDesktop.toggleFloating();
+      renderFloatingToggle(result && result.visible);
+    });
+  }
+  $("#task-note-save").addEventListener("click", saveTaskNote);
+  $("#task-note-clear").addEventListener("click", clearTaskNote);
+  $("#task-note-cancel").addEventListener("click", closeTaskNote);
+  $("#task-note-modal").addEventListener("click", (e) => {
+    if (e.target.id === "task-note-modal") closeTaskNote();
+  });
+  $("#focus-pause").addEventListener("click", toggleFocusPause);
+  $("#focus-stop").addEventListener("click", () => finishFocus(false));
+  $("#focus-cancel").addEventListener("click", () => finishFocus(true));
 
   $("#checkin-btn").addEventListener("click", doCheckin);
   $("#prev-day").addEventListener("click", () => {
@@ -2065,6 +2448,12 @@ function bind() {
     const d = new Date();
     monthCursor = d.getFullYear() + "-" + pad(d.getMonth() + 1);
     renderMonthly();
+  });
+  $$('[data-month-category-filter]').forEach((button) => {
+    button.addEventListener("click", () => {
+      monthCategoryFilter = button.dataset.monthCategoryFilter;
+      renderMonthly();
+    });
   });
   $("#monthly-gen-md").addEventListener("click", generateMonthlyReport);
   $("#monthly-export-pdf").addEventListener("click", exportMonthlyPDF);
@@ -2160,8 +2549,50 @@ function bind() {
     state.settings.backupReminderEnabled = e.target.checked;
     save();
   });
+  $("#pomodoro-toggle").addEventListener("change", (e) => {
+    state.settings.pomodoroEnabled = e.target.checked;
+    save();
+    renderRoute();
+  });
   $("#clear-demo-btn").addEventListener("click", clearDemo);
   $("#restore-demo-btn").addEventListener("click", restoreDemo);
+}
+
+function renderFloatingToggle(visible) {
+  const button = $("#floating-toggle");
+  const stateLabel = $("#floating-toggle-state");
+  if (!button || !stateLabel) return;
+  button.setAttribute("aria-pressed", String(!!visible));
+  stateLabel.textContent = visible ? "显示中" : "已隐藏";
+}
+
+function bindDesktopTaskSync() {
+  if (!DESKTOP) return;
+  window.traceDesktop.getFloatingState().then((result) => renderFloatingToggle(result && result.visible));
+  window.traceDesktop.onFloatingVisibility((result) => renderFloatingToggle(result && result.visible));
+  let refreshTimer = null;
+  window.traceDesktop.onTaskStateChanged(() => {
+    const wasAllDone = todayAllDone();
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(async () => {
+      const remote = await apiGetState();
+      if (!remote || !remote.meta || !remote.days) return;
+      state = normalize(remote);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (err) { /* 仅缓存 */ }
+      renderRoute();
+      if (!wasAllDone && todayAllDone()) celebrateAllDone();
+    }, 80);
+  });
+  window.traceDesktop.onFocusStateChanged((next) => {
+    activeFocusSession = next && next.active || null;
+    if (!activeFocusSession) closeFocusModal();
+    else if (focusModalOpen) updateFocusModal();
+    if (currentView() === "today") renderToday();
+  });
+  window.traceDesktop.focusGetState().then((next) => {
+    activeFocusSession = next && next.active || null;
+    if (currentView() === "today") renderToday();
+  });
 }
 
 /* ============ 启动 ============ */
@@ -2170,6 +2601,7 @@ function bind() {
   if (state) {
     applyTheme(state.settings.style || "paper");
     bind();
+    bindDesktopTaskSync();
     renderRoute();
   } else {
     /* 数据损坏时仅绑定恢复向导，等用户选择后再进入主流程 */

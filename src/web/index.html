@@ -7,9 +7,17 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body data-page="today">
+  <!-- 顶部控制条：拖动区 + 图四风格圆点 / X 窗口控制 -->
+  <div class="window-bar">
+    <div class="window-drag-zone" aria-hidden="true"></div>
+    <div class="window-dot-btns">
+      <button id="win-minimize" class="win-dot minimize" type="button" title="最小化" aria-label="最小化"></button>
+      <button id="win-maximize" class="win-dot maximize" type="button" title="最大化/还原" aria-label="最大化/还原"></button>
+      <button id="win-close" class="win-dot close" type="button" title="关闭" aria-label="关闭"></button>
+    </div>
+  </div>
   <div class="layout">
     <aside class="sidebar">
-      <a class="brand" href="#today">留痕<span class="brand-en">Leave a Trace</span></a>
       <nav class="nav-list">
         <a class="nav-link" href="#today">今日记录</a>
         <a class="nav-link" href="#monthly">月度汇总</a>
@@ -18,14 +26,18 @@
         <a class="nav-link" href="#settings">设置</a>
         <a class="nav-link" href="#workbench">项目工作台</a>
       </nav>
-      <button class="theme-btn" id="theme-toggle" type="button" aria-label="切换深浅色">☾</button>
+      <div class="sidebar-tools">
+        <button class="floating-toggle-btn" id="floating-toggle" type="button" aria-pressed="false">
+          <span>浮窗待办</span>
+          <small id="floating-toggle-state">已隐藏</small>
+        </button>
+      </div>
     </aside>
 
     <main class="main">
       <!-- 全局搜索（常驻顶部） -->
       <div class="global-search" id="global-search">
         <div class="search-input-wrap">
-          <span aria-hidden="true">🔍</span>
           <input id="search-input" type="text" placeholder="搜索任务 / 文件 / 月报" autocomplete="off">
           <div class="search-results hidden" id="search-results"></div>
         </div>
@@ -70,11 +82,33 @@
         <section class="panel">
           <div class="panel-head">
             <h2>任务</h2>
-            <span class="count" id="task-count"></span>
+            <div class="task-panel-summary">
+              <span class="today-focus-stat" id="today-focus-stat">今日专注 0 分钟</span>
+              <span class="count" id="task-count"></span>
+            </div>
+          </div>
+          <div class="category-tabs" id="today-category-tabs" aria-label="任务分类筛选">
+            <button class="category-tab active" type="button" data-task-category-filter="all">全部</button>
+            <button class="category-tab" type="button" data-task-category-filter="work">工作事务</button>
+            <button class="category-tab" type="button" data-task-category-filter="life">生活事务</button>
           </div>
           <form class="add-form" id="add-form" autocomplete="off">
-            <input id="task-input" type="text" placeholder="添加任务，支持“任务名 18:00”快速设置截止时间">
-            <button class="primary-btn" type="submit">添加</button>
+            <div class="task-category-picker" id="task-category-picker" role="radiogroup" aria-label="选择新任务分类">
+              <button class="task-category-card" type="button" role="radio" data-task-category="work" aria-checked="true">
+                <span class="task-category-count" id="task-category-work-count">0</span>
+                <span class="task-category-label">工作事务</span>
+                <span class="task-category-selected">当前选择</span>
+              </button>
+              <button class="task-category-card" type="button" role="radio" data-task-category="life" aria-checked="false">
+                <span class="task-category-count" id="task-category-life-count">0</span>
+                <span class="task-category-label">生活事务</span>
+                <span class="task-category-selected" hidden>当前选择</span>
+              </button>
+            </div>
+            <div class="task-entry-line">
+              <input id="task-input" type="text" placeholder="添加任务，支持“任务名 18:00”快速设置截止时间">
+              <button class="primary-btn" type="submit">添加</button>
+            </div>
           </form>
           <ul class="task-list" id="task-list"></ul>
           <p class="empty-hint" id="empty-hint">今天还没有任务，先记下第一件事吧。</p>
@@ -94,6 +128,11 @@
               <input type="month" id="month-input">
               <button class="ghost-btn btn-sm" id="month-today-btn" type="button">本月</button>
             </div>
+          </div>
+          <div class="category-tabs" id="monthly-category-tabs" aria-label="月度任务分类筛选">
+            <button class="category-tab active" type="button" data-month-category-filter="all">全部</button>
+            <button class="category-tab" type="button" data-month-category-filter="work">工作事务</button>
+            <button class="category-tab" type="button" data-month-category-filter="life">生活事务</button>
           </div>
           <div class="metric-row" id="monthly-metrics"></div>
           <div class="btn-row">
@@ -186,9 +225,9 @@
           <div class="setting-row">
             <label for="theme-select">风格</label>
             <select id="theme-select">
-              <option value="paper">纸感手账（默认）</option>
-              <option value="dark">墨夜深色</option>
-              <option value="modern">现代克制</option>
+              <option value="paper">暖阳（默认）</option>
+              <option value="dark">极夜</option>
+              <option value="warm">晴空</option>
             </select>
           </div>
         </section>
@@ -201,6 +240,10 @@
           <div class="setting-row">
             <label for="reminder-toggle">新增记录满 20 条提醒备份</label>
             <input type="checkbox" id="reminder-toggle">
+          </div>
+          <div class="setting-row">
+            <label for="pomodoro-toggle">启用专注番茄钟</label>
+            <input type="checkbox" id="pomodoro-toggle">
           </div>
         </section>
         <section class="panel">
@@ -253,6 +296,27 @@
 
   <div class="toast" id="toast" role="status"></div>
 
+  <!-- 任务专注番茄钟 -->
+  <div class="modal-mask hidden" id="focus-modal">
+    <div class="modal focus-modal" role="dialog" aria-modal="true" aria-labelledby="focus-modal-title">
+      <p class="eyebrow">专注番茄钟</p>
+      <h3 id="focus-modal-title">当前任务</h3>
+      <div class="focus-ring-wrap">
+        <svg class="focus-ring" viewBox="0 0 152 152" aria-hidden="true">
+          <circle class="focus-ring-track" cx="76" cy="76" r="64"></circle>
+          <circle class="focus-ring-progress" id="focus-ring-progress" cx="76" cy="76" r="64"></circle>
+        </svg>
+        <div class="focus-ring-time" id="focus-ring-time">00:00</div>
+      </div>
+      <p class="focus-task-meta" id="focus-task-meta"></p>
+      <div class="modal-actions focus-actions">
+        <button class="ghost-btn" id="focus-pause" type="button">暂停</button>
+        <button class="primary-btn" id="focus-stop" type="button">停止并结算</button>
+        <button class="ghost-btn" id="focus-cancel" type="button">取消（不结算）</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 数据损坏恢复向导 -->
   <div class="modal-mask hidden" id="corrupt-modal">
     <div class="modal">
@@ -275,6 +339,21 @@
         <button class="primary-btn" id="import-merge" type="button">合并（按日期覆盖）</button>
         <button class="ghost-btn" id="import-replace" type="button">替换全部数据</button>
         <button class="ghost-btn" id="import-cancel" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 今日任务：备注编辑 -->
+  <div class="modal-mask hidden" id="task-note-modal">
+    <div class="modal">
+      <h3>任务备注</h3>
+      <p class="sub" id="task-note-title"></p>
+      <label for="task-note-input">备注内容</label>
+      <textarea id="task-note-input" class="input-area" rows="6" maxlength="2000" placeholder="补充背景、沟通结果、下一步或需要留意的信息。"></textarea>
+      <div class="modal-actions">
+        <button class="primary-btn" id="task-note-save" type="button">保存备注</button>
+        <button class="ghost-btn" id="task-note-clear" type="button">清空备注</button>
+        <button class="ghost-btn" id="task-note-cancel" type="button">取消</button>
       </div>
     </div>
   </div>

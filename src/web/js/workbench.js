@@ -619,10 +619,13 @@
       status: ["待开始", "已完成", "已逾期"].includes(t.status) ? t.status : "待开始",
       priority: ["高", "低"].includes(t.priority) ? t.priority : "中",
       source: t.source || "手动录入",
+      category: t.category === "life" ? "life" : "work",
+      note: typeof t.note === "string" ? t.note : "",
       progressRecords: (t.progressRecords || []).map(normalizeProgress),
       attachments: (t.attachments || []).map(normalizeAttachment),
       completedAt: t.completedAt || t.doneAt,
-      createdAt: t.createdAt || new Date().toISOString()
+      createdAt: t.createdAt || new Date().toISOString(),
+      updatedAt: t.updatedAt || t.createdAt || new Date().toISOString()
     });
   }
 
@@ -651,9 +654,27 @@
     };
   }
 
+  function syncFloatingTasks() {
+    if (!window.traceDesktop || !window.traceDesktop.syncWorkbenchTasks) return;
+    const summaries = state.tasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      status: task.status,
+      dueText: task.dueText,
+      note: task.note,
+      priority: task.priority,
+      projectName: task.projectName,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt
+    }));
+    window.traceDesktop.syncWorkbenchTasks(summaries).catch(() => {});
+  }
+
   function save() {
     try {
       localStorage.setItem(WB_KEY, JSON.stringify(state));
+      syncFloatingTasks();
       return true;
     } catch (err) {
       toast("保存失败，数据未落盘，请检查浏览器存储空间", true);
@@ -776,10 +797,11 @@
       .map(([name, group], i) => {
         const lines = group.flatMap((t) => {
           const out = [];
-          if (t.status === "已完成" && inRange(t.completedAt || t.statusUpdatedAt, n)) out.push("完成" + t.title);
-          t.progressRecords.filter((r) => inRange(r.createdAt, n)).forEach((r) => out.push("推进" + t.title + "：" + r.content));
-          t.attachments.filter((x) => inRange(x.uploadedAt, n)).forEach((x) => out.push("补充" + t.title + "相关资料：" + x.name));
-          if (!out.length && inRange(t.createdAt, n)) out.push("新增待办：" + t.title);
+          const category = "【" + categoryName(t.category) + "】";
+          if (t.status === "已完成" && inRange(t.completedAt || t.statusUpdatedAt, n)) out.push(category + "完成" + t.title);
+          t.progressRecords.filter((r) => inRange(r.createdAt, n)).forEach((r) => out.push(category + "推进" + t.title + "：" + r.content));
+          t.attachments.filter((x) => inRange(x.uploadedAt, n)).forEach((x) => out.push(category + "补充" + t.title + "相关资料：" + x.name));
+          if (!out.length && inRange(t.createdAt, n)) out.push(category + "新增待办：" + t.title);
           return out;
         });
         return (i + 1) + ". " + name + "\n" + lines.slice(0, 6).map((x) => "- " + x).join("\n");
@@ -789,8 +811,8 @@
     const parts = [
       "工作完成情况",
       grouped.length ? grouped.join("\n\n") : "当前范围内暂无已记录的完成、进展或附件。",
-      follow.length ? "\n待跟进事项\n" + follow.map((t) => "- " + t.title).join("\n") : "",
-      risk.length ? "\n风险 / 已逾期：\n" + risk.map((t) => "- " + t.title + "需要优先处理。").join("\n") : ""
+      follow.length ? "\n待跟进事项\n" + follow.map((t) => "- 【" + categoryName(t.category) + "】" + t.title).join("\n") : "",
+      risk.length ? "\n风险 / 已逾期：\n" + risk.map((t) => "- 【" + categoryName(t.category) + "】" + t.title + "需要优先处理。").join("\n") : ""
     ].filter(Boolean);
     return s.length ? parts.join("\n") : "当前范围内暂无可汇总的工作内容。";
   }
@@ -825,6 +847,7 @@
       status: "待开始",
       priority: ["高", "低"].includes(extra.priority) ? extra.priority : "中",
       source: extra.source || "手动录入",
+      category: extra.category === "life" ? "life" : "work",
       note: extra.note || ""
     };
   }
@@ -844,6 +867,7 @@
           owner: fieldOf(c, "负责人"),
           priority: fieldOf(c, "优先级"),
           source: fieldOf(c, "来源") || "AI整理",
+          category: /生活|个人/.test(fieldOf(c, "任务分类")) ? "life" : "work",
           note: fieldOf(c, "备注")
         }
       ));
@@ -900,6 +924,7 @@
     state.tasks = state.tasks.map((t) => {
       if (t.id !== id) return t;
       const next = Object.assign({}, t, patch);
+      next.updatedAt = now;
       next.statusUpdatedAt = patch.status ? now : t.statusUpdatedAt;
       if (next.status === "已完成" && !next.completedAt) next.completedAt = now;
       if ((next.status === "进行中" || next.status === "待开始") && next.completedAt) next.completedAt = undefined;
@@ -1152,7 +1177,8 @@
   let previewTasks = [];
   let selectedTaskId = null;
   let selectedProjectId = null;
-  let filters = { tab: "全部", search: "", project: "all", status: "all" };
+  let filters = { tab: "全部", search: "", project: "all", status: "all", category: "all" };
+  let homeCategoryFilter = "all";
   let selectedRows = [];
   let reportTab = "daily";
   let reportRange = "today";
@@ -1204,6 +1230,19 @@
     return p ? p.name : "个人待办";
   }
 
+  function categoryName(category) {
+    return category === "life" ? "生活事务" : "工作事务";
+  }
+
+  function categoryTag(t) {
+    const category = t.category === "life" ? "life" : "work";
+    return `<span class="wb-category wb-category-${category}">${categoryName(category)}</span>`;
+  }
+
+  function categoryTasks(tasks, category) {
+    return category === "all" ? tasks : tasks.filter((t) => (t.category === "life" ? "life" : "work") === category);
+  }
+
   function statusBadge(status) {
     const cls = { "已完成": "done", "已逾期": "overdue", "进行中": "doing", "待开始": "todo" }[status] || "todo";
     return `<span class="wb-badge wb-badge-${cls}">${wbEsc(status)}</span>`;
@@ -1216,28 +1255,30 @@
       <button class="wb-task-check ${t.status === "已完成" ? "done" : ""}" type="button" onclick="WB.completeTask('${t.id}')" title="标记完成">${t.status === "已完成" ? "✓" : ""}</button>
       <div class="wb-task-main">
         <div class="wb-task-title" onclick="WB.openTask('${t.id}')">${wbEsc(t.title)}</div>
-        <div class="wb-task-meta">${wbEsc(projectName(t.projectId))}${t.classificationStatus === "待归类" ? ' <span class="wb-tag wb-tag-warn">待归类</span>' : ""}${t.dueText && t.dueText !== "未明确" ? " · 截止 " + wbEsc(t.dueText) : ""}${t.priority === "高" ? ' <span class="wb-tag wb-tag-red">高</span>' : ""}</div>
+        <div class="wb-task-meta">${categoryTag(t)} ${wbEsc(projectName(t.projectId))}${t.classificationStatus === "待归类" ? ' <span class="wb-tag wb-tag-warn">待归类</span>' : ""}${t.dueText && t.dueText !== "未明确" ? " · 截止 " + wbEsc(t.dueText) : ""}${t.priority === "高" ? ' <span class="wb-tag wb-tag-red">高</span>' : ""}${t.note ? ' · <span class="wb-note-hint">有备注</span>' : ""}</div>
       </div>
-      <div class="wb-task-side">${statusBadge(st)}</div>
+      <div class="wb-task-side">${statusBadge(st)}<button class="wb-note-btn" type="button" onclick="WB.openNote('${t.id}')">${t.note ? "编辑备注" : "备注"}</button></div>
     </div>`;
   }
 
   function renderHome() {
     const box = wb$("#wb-home");
     if (!box) return;
-    const groups = homeGroups(state.tasks, state.todoOrder);
-    const feed = todayFeed(state.tasks);
+    const homeTasks = categoryTasks(state.tasks, homeCategoryFilter);
+    const groups = homeGroups(homeTasks, state.todoOrder);
+    const feed = todayFeed(homeTasks);
     const stats = {
       todoTotal: groups.overdue.length + groups.today.length + groups.soon.length,
       overdue: groups.overdue.length,
       today: groups.today.length,
       soon: groups.soon.length,
       feedTotal: feed.length,
-      completed: state.tasks.filter((t) => t.status === "已完成" && inRange(t.completedAt || t.statusUpdatedAt, { start: todayStr(), end: todayStr() })).length,
-      attachments: state.tasks.reduce((n, t) => n + t.attachments.filter((a) => inRange(a.uploadedAt, { start: todayStr(), end: todayStr() })).length, 0)
+      completed: homeTasks.filter((t) => t.status === "已完成" && inRange(t.completedAt || t.statusUpdatedAt, { start: todayStr(), end: todayStr() })).length,
+      attachments: homeTasks.reduce((n, t) => n + t.attachments.filter((a) => inRange(a.uploadedAt, { start: todayStr(), end: todayStr() })).length, 0)
     };
-    const attention = groups.overdue.concat(groups.soon).slice(0, 2);
-    const draft = buildReport(state.tasks, "all", { start: todayStr(), end: todayStr() });
+    const attentionAll = groups.overdue.concat(groups.soon);
+    const attention = attentionAll.slice(0, 2);
+    const draft = buildReport(homeTasks, "all", { start: todayStr(), end: todayStr() });
     const showOnboarding = state.onboarding.status !== "completed" && state.tasks.length === 0;
 
     let html = "";
@@ -1258,7 +1299,12 @@
       </div>`;
     }
 
-    html += `<div class="wb-stats">
+    html += `<div class="wb-home-toolbar">
+      <span class="wb-subtle">事务视图</span>
+      <div class="wb-category-tabs">
+        ${[["all", "全部"], ["work", "工作事务"], ["life", "生活事务"]].map(([value, label]) => `<button class="wb-filter ${homeCategoryFilter === value ? "active" : ""}" type="button" onclick="WB.setHomeCategory('${value}')">${label} ${categoryTasks(state.tasks, value).length}</button>`).join("")}
+      </div>
+    </div><div class="wb-stats">
       <button class="wb-stat" type="button" onclick="WB.scrollTo('wb-today-todo')">
         <div><h3>今日待办</h3><div class="wb-stat-num">${stats.todoTotal}</div><div class="wb-stat-desc">已逾期 ${stats.overdue}｜今天 ${stats.today}｜快到期 ${stats.soon}</div></div>
         <div class="wb-stat-icon blue">☰</div>
@@ -1268,7 +1314,7 @@
           ${attention.length
             ? attention.map((t) => `<span class="wb-attention-item">${wbEsc(t.title)}</span>`).join("")
             : '<div class="wb-stat-desc">暂无需要特别关注的事项</div>'}
-          ${attention.length > 2 ? `<div class="wb-stat-desc">还有 ${attention.length - 2} 条</div>` : ""}
+          ${attentionAll.length > 2 ? `<div class="wb-stat-desc">还有 ${attentionAll.length - 2} 条</div>` : ""}
         </div>
         <div class="wb-stat-icon red">!</div>
       </button>
@@ -1319,13 +1365,17 @@
       <div class="wb-actions-row"><button class="primary-btn" type="button" onclick="WB.generatePreview()">生成任务预览</button></div>
       ${previewTasks.length ? `<div class="wb-preview-list">
         <div class="wb-panel-head"><h2>任务预览</h2><button class="primary-btn btn-sm" type="button" onclick="WB.importPreview()">确认导入选中任务</button></div>
-        <p class="wb-subtle">导入前只轻编辑任务名称、所属项目、截止时间。其他信息保存到任务详情里。</p>
+        <p class="wb-subtle">导入前可以确认任务名称、事务分类、所属项目和截止时间，其他信息保存在任务详情里。</p>
         ${previewTasks.map((p, i) => `<div class="wb-preview-card">
           <input type="checkbox" ${p.selected ? "checked" : ""} onchange="WB.togglePreview(${i})">
           <div class="wb-preview-fields">
             <label>任务内容</label>
             <input class="wb-input" value="${wbEsc(p.title)}" onchange="WB.editPreview(${i},'title',this.value)">
             <p class="wb-preview-note">${wbEsc(p.note || "暂无备注")}</p>
+          </div>
+          <div class="wb-preview-fields">
+            <label>事务分类</label>
+            <select class="wb-input" onchange="WB.editPreview(${i},'category',this.value)"><option value="work" ${p.category !== "life" ? "selected" : ""}>工作事务</option><option value="life" ${p.category === "life" ? "selected" : ""}>生活事务</option></select>
           </div>
           <div class="wb-preview-fields">
             <label>所属项目</label>
@@ -1354,6 +1404,7 @@
     const tabs = ["全部", "今天", "近 7 天", "已逾期", "未分项目", "待开始", "已完成"];
     const list = state.tasks.filter((t) => {
       if (filters.project !== "all" && t.projectId !== filters.project) return false;
+      if (filters.category !== "all" && (t.category === "life" ? "life" : "work") !== filters.category) return false;
       const st = effectiveStatus(t);
       if (filters.status !== "all" && st !== filters.status) return false;
       if (filters.search && !t.title.includes(filters.search)) return false;
@@ -1372,6 +1423,7 @@
       <div class="wb-filters">
         ${tabs.map((t) => `<button class="wb-filter ${filters.tab === t ? "active" : ""}" type="button" onclick="WB.setFilter('tab','${t}')">${t}</button>`).join("")}
         <input class="wb-input wb-search" id="wb-search-input" placeholder="搜索任务" value="${wbEsc(filters.search)}" oninput="WB.setFilter('search',this.value)">
+        <select class="wb-input" onchange="WB.setFilter('category',this.value)"><option value="all">全部事务</option><option value="work" ${filters.category === "work" ? "selected" : ""}>工作事务</option><option value="life" ${filters.category === "life" ? "selected" : ""}>生活事务</option></select>
         <select class="wb-input" onchange="WB.setFilter('project',this.value)"><option value="all">全部项目</option>${state.projects.map((p) => `<option value="${p.id}" ${filters.project === p.id ? "selected" : ""}>${wbEsc(p.name)}</option>`).join("")}</select>
         <select class="wb-input" onchange="WB.setFilter('status',this.value)"><option value="all">全部状态</option>${["待开始", "进行中", "已完成"].map((s) => `<option value="${s}" ${filters.status === s ? "selected" : ""}>${s}</option>`).join("")}</select>
       </div>
@@ -1383,16 +1435,17 @@
         <button class="ghost-btn btn-sm wb-danger" type="button" onclick="WB.batchDelete()">删除所选</button>
       </div>` : ""}
       ${list.length ? `<div class="wb-table">
-        <div class="wb-table-head"><span></span><span>任务</span><span>项目</span><span>状态</span><span>截止</span><span>优先级</span><span>来源</span><span>操作</span></div>
+        <div class="wb-table-head"><span></span><span>任务</span><span>分类</span><span>项目</span><span>状态</span><span>截止</span><span>优先级</span><span>来源</span><span>操作</span></div>
         ${list.map((t) => `<div class="wb-table-row">
           <input type="checkbox" ${selectedRows.includes(t.id) ? "checked" : ""} onchange="WB.toggleRow('${t.id}')">
           <span class="wb-task-title" onclick="WB.openTask('${t.id}')">${wbEsc(t.title)}</span>
+          <span>${categoryTag(t)}</span>
           <span>${wbEsc(projectName(t.projectId))}${t.classificationStatus === "待归类" ? ' <span class="wb-tag wb-tag-warn">待归类</span>' : ""}</span>
           <span>${statusBadge(effectiveStatus(t))}</span>
           <span class="wb-muted">${wbEsc(t.dueText || "未明确")}</span>
           <span>${wbEsc(t.priority)}</span>
           <span class="wb-muted">${wbEsc(t.source)}</span>
-          <span class="wb-row-actions"><button class="ghost-btn btn-sm" type="button" onclick="WB.openTask('${t.id}')">打开</button>${t.status !== "已完成" ? `<button class="ghost-btn btn-sm" type="button" onclick="WB.completeTask('${t.id}')">完成</button>` : ""}</span>
+          <span class="wb-row-actions"><button class="ghost-btn btn-sm" type="button" onclick="WB.openNote('${t.id}')">${t.note ? "编辑备注" : "备注"}</button>${t.status !== "已完成" ? `<button class="ghost-btn btn-sm" type="button" onclick="WB.completeTask('${t.id}')">完成</button>` : ""}<button class="ghost-btn btn-sm wb-danger" type="button" onclick="WB.deleteTask('${t.id}')">删除</button></span>
         </div>`).join("")}
       </div>` : '<p class="wb-empty">还没有任务，先去录入一条吧。</p>'}
     </div>`;
@@ -1544,6 +1597,7 @@
       <label>任务内容</label>
       <input class="wb-input" value="${wbEsc(t.title)}" onchange="WB.updateTaskField('${t.id}','title',this.value)">
       <div class="wb-form-grid">
+        <div><label>事务分类</label><select class="wb-input" onchange="WB.updateTaskField('${t.id}','category',this.value)"><option value="work" ${t.category !== "life" ? "selected" : ""}>工作事务</option><option value="life" ${t.category === "life" ? "selected" : ""}>生活事务</option></select></div>
         <div><label>所属项目</label><select class="wb-input" onchange="WB.updateTaskProject('${t.id}',this.value)">${state.projects.map((p) => `<option value="${p.id}" ${p.id === t.projectId ? "selected" : ""}>${wbEsc(p.name)}</option>`).join("")}</select></div>
         <div><label>状态</label><select class="wb-input" onchange="WB.updateTaskField('${t.id}','status',this.value)">${["待开始", "进行中", "已完成"].map((s) => `<option value="${s}" ${t.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></div>
         <div><label>截止时间</label><input class="wb-input" value="${wbEsc(t.dueText || "")}" onchange="WB.updateTaskField('${t.id}','dueText',this.value)"></div>
@@ -1552,7 +1606,7 @@
         <div><label>来源</label><input class="wb-input" value="${wbEsc(t.source || "")}" onchange="WB.updateTaskField('${t.id}','source',this.value)"></div>
       </div>
       <label>备注</label>
-      <textarea class="wb-input" rows="3" onchange="WB.updateTaskField('${t.id}','note',this.value)">${wbEsc(t.note || "")}</textarea>
+      <textarea class="wb-input" id="wb-task-note-input" rows="4" maxlength="2000" placeholder="补充背景、沟通结果或下一步" onchange="WB.updateTaskField('${t.id}','note',this.value)">${wbEsc(t.note || "")}</textarea>
       <div class="wb-panel-flat">
         <h4>进展记录</h4>
         ${t.progressRecords && t.progressRecords.length ? t.progressRecords.map((r) => `<div class="wb-progress-item"><b>${wbEsc(fmtMDHM(r.createdAt))}</b>${r.statusChange ? `<span class="wb-tag">${wbEsc(r.statusChange)}</span>` : ""}<p>${wbEsc(r.content)}</p></div>`).join("") : '<p class="wb-empty">暂无进展记录。</p>'}
@@ -1699,6 +1753,14 @@
     gotoIntake() { setWbView("intake"); closeModals(); },
     scrollTo(id) { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); },
     openTask(id) { selectedTaskId = id; renderTaskModal(); },
+    openNote(id) {
+      selectedTaskId = id;
+      renderTaskModal();
+      requestAnimationFrame(() => {
+        const note = wb$("#wb-task-note-input");
+        if (note) note.focus();
+      });
+    },
     deleteTask(id) { deleteTasks([id]); closeModals(); },
     openProject(id) { selectedProjectId = id; renderProjectModal(); },
     openNewProject() { wb$("#wb-new-project-modal").classList.remove("hidden"); },
@@ -1738,6 +1800,7 @@
       if (kind === "tab") { filters.tab = value; selectedRows = []; }
       if (kind === "project") { filters.project = value; selectedRows = []; }
       if (kind === "status") { filters.status = value; selectedRows = []; }
+      if (kind === "category") { filters.category = value; selectedRows = []; }
       renderTasks();
       window.__wbSearchFocused = false;
     },
@@ -1756,6 +1819,10 @@
     },
     batchDelete() { deleteTasks(selectedRows); },
     setProjectTab(t) { projectTab = t; renderProjects(); },
+    setHomeCategory(category) {
+      homeCategoryFilter = ["all", "work", "life"].includes(category) ? category : "all";
+      renderHome();
+    },
     setReportTab(t) { reportTab = t; renderReports(); },
     setRange(r) { reportRange = r; renderReports(); },
     setCustom(kind, v) { if (kind === "start") rangeStart = v; else rangeEnd = v; renderReports(); },
@@ -1765,7 +1832,7 @@
       copyText(full, "已复制，可粘贴到微信 / 飞书 / 邮件");
     },
     copyReport() {
-      const draft = buildReport(state.tasks, "all", { start: todayStr(), end: todayStr() });
+      const draft = buildReport(categoryTasks(state.tasks, homeCategoryFilter), "all", { start: todayStr(), end: todayStr() });
       copyText("今天 日报\n\n" + draft, "已复制日报草稿");
     },
     saveReport() {
@@ -1833,6 +1900,7 @@
     editPreview(i, field, value) {
       if (field === "title") previewTasks[i].title = value;
       if (field === "dueText") previewTasks[i].dueText = value;
+      if (field === "category") previewTasks[i].category = value === "life" ? "life" : "work";
       save();
     },
     editPreviewProject(i, projectId) {
@@ -1851,6 +1919,7 @@
         id: wbUid("task"),
         status: "待开始",
         createdAt: now,
+        updatedAt: now,
         progressRecords: [],
         attachments: []
       }));
@@ -1865,7 +1934,7 @@
       toast(completing ? "基础设置完成。以后可以随时打开 AI 助手，整理工作信息并录入任务。" : "任务已录入，后续可在任务清单或项目管理中归类到具体项目。");
     },
     openAttention() {
-      const groups = homeGroups(state.tasks, state.todoOrder);
+      const groups = homeGroups(categoryTasks(state.tasks, homeCategoryFilter), state.todoOrder);
       const items = groups.overdue.concat(groups.soon);
       if (items.length) {
         selectedTaskId = items[0].id;
@@ -1876,8 +1945,15 @@
     }
   };
 
+  if (window.traceDesktop && window.traceDesktop.onWorkbenchComplete) {
+    window.traceDesktop.onWorkbenchComplete((payload) => {
+      if (payload && payload.id) completeTask(payload.id);
+    });
+  }
+
   /* ================= 启动 ================= */
   load();
+  syncFloatingTasks();
   bind();
   window.renderWorkbench = function () {
     if (!state) load();
