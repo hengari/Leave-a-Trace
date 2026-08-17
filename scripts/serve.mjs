@@ -8,18 +8,32 @@
  * 数据库层与桌面端共用：electron/trace-db.cjs
  * ============================================================ */
 import { createServer } from "node:http";
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { stat, readFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import traceDbMod from "../electron/trace-db.cjs";
+import webdavSyncMod from "./webdav-sync.cjs";
 
 const { openTraceDb, MIME } = traceDbMod;
+const { syncOnce } = webdavSyncMod;
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const webRoot = resolve(projectRoot, "src", "web");
-const dataRoot = resolve(projectRoot, "data");
+
+/* 数据目录：与桌面端共用同一 SQLite（网页 ⇄ 桌面实时同步）。
+   优先级：--data-dir 参数 > TRACE_DATA_DIR 环境变量
+   > Windows 桌面端用户数据（%APPDATA%\留痕\data）> 项目 data/ */
+function defaultDataRoot() {
+  if (process.env.TRACE_DATA_DIR) return resolve(process.env.TRACE_DATA_DIR);
+  if (process.platform === "win32" && process.env.APPDATA) {
+    return join(process.env.APPDATA, "留痕", "data");
+  }
+  return resolve(projectRoot, "data");
+}
+const argIdx = process.argv.indexOf("--data-dir");
+const dataRoot = resolve(argIdx > -1 ? process.argv[argIdx + 1] : defaultDataRoot());
 
 const defaultPort = 8787;
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || process.env.PORT || defaultPort);
@@ -28,6 +42,42 @@ const MAX_STATE_BYTES = 200 * 1024 * 1024;
 const MAX_FILE_BYTES = 500 * 1024 * 1024;
 
 const traceDb = await openTraceDb(dataRoot);
+
+/* ---------- 云端同步（WebDAV，坚果云等） ---------- */
+function loadSyncConfig() {
+  try {
+    const raw = readFileSync(resolve(projectRoot, "sync-config.json"), "utf8");
+    const cfg = JSON.parse(raw);
+    if (cfg && cfg.enabled === false) return null;
+    return cfg && cfg.url && cfg.username ? cfg : null;
+  } catch {
+    return null;
+  }
+}
+const syncConfig = loadSyncConfig();
+
+let syncTimer = null;
+let syncRunning = false;
+async function runSync(reason) {
+  if (!syncConfig || syncRunning) return;
+  syncRunning = true;
+  try {
+    await syncOnce(syncConfig, {
+      getState: () => traceDb.getState(),
+      putState: (s) => traceDb.putState(s),
+      log: (msg) => console.log(msg + (reason ? "（" + reason + "）" : ""))
+    });
+  } catch (err) {
+    console.log("[sync] 失败: " + (err && err.message || err) + (reason ? "（" + reason + "）" : ""));
+  } finally {
+    syncRunning = false;
+  }
+}
+function scheduleSync(reason, delay = 3000) {
+  if (!syncConfig) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => runSync(reason), delay);
+}
 
 /* ---------- 工具 ---------- */
 function sendJson(res, status, obj) {
@@ -61,6 +111,56 @@ function safeId(id) {
   return typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
 }
 
+/* 合并状态：按日期/任务 id 取并集（incoming 优先），
+   防止网页端与桌面端同时编辑时整表覆盖丢失对方数据。
+   注意：网页端删除的任务会保留（避免误删覆盖），桌面端删除仍即时生效 */
+function mergeState(existing, incoming) {
+  if (!existing) return incoming;
+  const days = {};
+  const allDates = new Set([...Object.keys(existing.days || {}), ...Object.keys(incoming.days || {})]);
+  for (const date of allDates) {
+    const ex = (existing.days && existing.days[date]) || null;
+    const inc = (incoming.days && incoming.days[date]) || null;
+    if (!inc) { days[date] = ex; continue; }
+    if (!ex) { days[date] = inc; continue; }
+    const tasks = {};
+    for (const t of (ex.tasks || [])) if (t && t.id) tasks[t.id] = t;
+    for (const t of (inc.tasks || [])) if (t && t.id) tasks[t.id] = t;
+    days[date] = { ...inc, tasks: Object.values(tasks), checkIn: inc.checkIn || ex.checkIn || null };
+  }
+  const files = {};
+  for (const f of (existing.files || [])) if (f && f.id) files[f.id] = f;
+  for (const f of (incoming.files || [])) if (f && f.id) files[f.id] = f;
+  const reports = {};
+  for (const r of (existing.monthlyReports || [])) if (r && (r.id || r.month)) reports[r.id || r.month] = r;
+  for (const r of (incoming.monthlyReports || [])) if (r && (r.id || r.month)) reports[r.id || r.month] = r;
+  // 墓碑合并：按 id 取 deletedAt 较新者，并应用到 days（删除跨端传播）
+  const deleted = {};
+  for (const [id, t] of Object.entries(existing.deletedTasks || {})) deleted[id] = t;
+  for (const [id, t] of Object.entries(incoming.deletedTasks || {})) {
+    if (!deleted[id] || (t.deletedAt || "") > (deleted[id].deletedAt || "")) deleted[id] = t;
+  }
+  for (const day of Object.values(days)) {
+    day.tasks = (day.tasks || []).filter((task) => !deleted[task.id]);
+  }
+  let count = 0;
+  for (const day of Object.values(days)) count += (day.tasks || []).length;
+  return {
+    meta: {
+      version: 1,
+      createdAt: incoming.meta.createdAt || (existing.meta && existing.meta.createdAt) || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      recordCount: count,
+      nextBackupHintAt: incoming.meta.nextBackupHintAt ?? (existing.meta && existing.meta.nextBackupHintAt) ?? 20
+    },
+    days,
+    files: Object.values(files),
+    monthlyReports: Object.values(reports),
+    deletedTasks: deleted,
+    settings: incoming.settings || existing.settings || {}
+  };
+}
+
 /* ---------- API：状态 ---------- */
 async function apiGetState(req, res) {
   const data = traceDb.getState();
@@ -75,7 +175,10 @@ async function apiPutState(req, res) {
       sendJson(res, 400, { ok: false, error: "state 格式不正确（需要 meta 与 days）" });
       return;
     }
-    const updatedAt = traceDb.putState(data);
+    const existing = traceDb.getState();
+    const merged = mergeState(existing, data);
+    const updatedAt = traceDb.putState(merged);
+    scheduleSync("状态变更");
     sendJson(res, 200, { ok: true, updatedAt });
   } catch (err) {
     if (err && err.message === "payload too large") {
@@ -171,6 +274,23 @@ async function route(req, res) {
     return;
   }
 
+  if (path === "/api/backup" && req.method === "POST") {
+    try {
+      const state = traceDb.getState();
+      if (!state) { sendJson(res, 400, { ok: false, error: "无数据可备份" }); return; }
+      const backupsDir = join(traceDb.dataRoot, "backups");
+      mkdirSync(backupsDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+      const file = join(backupsDir, "留痕-备份-" + stamp + ".json");
+      writeFileSync(file, JSON.stringify(state, null, 2), "utf8");
+      sendJson(res, 200, { ok: true, file });
+      return;
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: String(err && err.message || err) });
+      return;
+    }
+  }
+
   if (path === "/api/files") {
     if (req.method === "POST") { apiUploadFile(req, res, url); return; }
     if (req.method === "GET") {
@@ -220,4 +340,11 @@ server.listen(port, "0.0.0.0", () => {
   console.log(`数据库：${join(traceDb.dataRoot, "trace.db")}`);
   console.log(`文件存储：${traceDb.filesRoot}`);
   console.log(`静态目录：${webRoot}`);
+  if (syncConfig) {
+    console.log(`云端同步：已启用 → ${syncConfig.url}`);
+    setTimeout(() => runSync("启动"), 1500);
+    setInterval(() => runSync("定时"), 60000);
+  } else {
+    console.log("云端同步：未配置（跨设备同步请参照 sync-config.example.json 填写 sync-config.json）");
+  }
 });

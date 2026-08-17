@@ -225,7 +225,7 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  right: 112px;
+  right: 116px;
   height: 34px;
   -webkit-app-region: drag;
   user-select: none;
@@ -233,78 +233,73 @@ body {
 
 .window-dot-btns {
   position: absolute;
-  top: 10px;
-  right: 14px;
+  top: 7px; /* (34 - 20) / 2：与 20px 按钮精确垂直居中 */
+  right: 16px;
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   -webkit-app-region: no-drag;
 }
 
-/* 按钮颜色跟随主题文字色：浅色主题深图标、深色主题浅图标 */
+/* 窗口控制按钮：市面通用细线图标（最小化横线 / 最大化方框 / 关闭 X） */
 .win-dot {
   position: relative;
-  width: 13px;
-  height: 13px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer;
-  opacity: 0.72;
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  opacity: 0.85;
+  transition: opacity 0.16s ease, background 0.16s ease;
 }
-.win-dot:hover { opacity: 1; transform: scale(1.15); }
+.win-dot:hover { opacity: 1; background: var(--hover); }
 
-/* 圆形按钮：中间小圆点（最小化） */
-.win-dot.minimize {
-  border: 1.5px solid var(--ink);
-}
+/* 最小化：横线（MDI window-minimize，iconfont 常见样式） */
 .win-dot.minimize::after {
   content: "";
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
+  width: 14px;
+  height: 14px;
   background: var(--ink);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 14H4v-4h16' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 14H4v-4h16' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
   transform: translate(-50%, -50%);
 }
-.win-dot.minimize:hover { border-color: var(--accent); }
 .win-dot.minimize:hover::after { background: var(--accent); }
 
-/* 最大化按钮：空心小方框 */
-.win-dot.maximize {
-  border: 1.5px solid var(--ink);
-}
+/* 最大化：空心方框（MDI window-maximize） */
 .win-dot.maximize::after {
   content: "";
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 5px;
-  height: 5px;
-  border: 1.5px solid var(--ink);
-  border-radius: 1px;
+  width: 14px;
+  height: 14px;
+  background: var(--ink);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h16v16H4zm2 4v10h12V8z' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h16v16H4zm2 4v10h12V8z' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
   transform: translate(-50%, -50%);
 }
-.win-dot.maximize:hover { border-color: var(--accent); }
-.win-dot.maximize:hover::after { border-color: var(--accent); }
+.win-dot.maximize:hover::after { background: var(--accent); }
 
-/* X 按钮（关闭）：SVG mask 绘制，几何完美居中对称 */
-.win-dot.close {
-  border: 1.5px solid var(--ink);
-}
+/* 关闭：细线 X（MDI close-thick，与最小化/最大化同视觉重量） */
 .win-dot.close::before {
   content: "";
   position: absolute;
-  inset: 2px;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
   background: var(--ink);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 6L18 18M18 6L6 18' stroke='black' stroke-width='4.5' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 6L18 18M18 6L6 18' stroke='black' stroke-width='4.5' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 6.91L17.09 4L12 9.09L6.91 4L4 6.91L9.09 12L4 17.09L6.91 20L12 14.91L17.09 20L20 17.09L14.91 12z' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 6.91L17.09 4L12 9.09L6.91 4L4 6.91L9.09 12L4 17.09L6.91 20L12 14.91L17.09 20L20 17.09L14.91 12z' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: translate(-50%, -50%);
 }
 .win-dot.close::after { display: none; }
-.win-dot.close:hover { border-color: var(--danger); }
 .win-dot.close:hover::before { background: var(--danger); }
 
 .win-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

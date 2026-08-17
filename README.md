@@ -62,7 +62,38 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 
 前端通过 HTTP 打开时会自动切换到“服务模式”：数据读写走后端 API，文件上传落盘到服务器，局域网内其他设备可通过 `http://<本机IP>:8787/` 使用同一份数据。直接双击 `src/web/index.html` 打开时自动回退到 localStorage 模式，功能不受影响。
 
-### 方式二：直接打开原型（M1 验收用）
+### 方式二：网页 ⇄ 桌面端实时同步（2026-08-17 新增）
+
+服务模式的数据库**默认与桌面端共用同一份 SQLite**（Windows：`%APPDATA%\留痕\data\trace.db`），因此：
+
+- 网页端（`http://localhost:8787`）写入的任务，桌面端重启后即可看到
+- 桌面端写入的任务，网页端刷新页面即可看到
+- 两端同时编辑时，服务端按日期/任务 ID 合并，不会互相覆盖丢失
+
+启动方式：双击 `start-sync-server.bat`（或 `node scripts/serve.mjs`），自动打开 `http://localhost:8787`。
+
+数据目录优先级：`--data-dir <路径>` 参数 > `TRACE_DATA_DIR` 环境变量 > 桌面端用户数据目录 > 项目 `data/`。
+
+> 说明：合并策略（并集 + 墓碑）下，任务新增/编辑/删除均可跨端传播——删除会记录墓碑（`deletedTasks`），云端同步按墓碑过滤，不会把已删任务"复活"。文件库文件同样共用（上传到 `%APPDATA%\留痕\data\files\`）。
+
+### 方式三：跨设备同步（公司电脑 ⇄ 家里电脑，2026-08-17 新增）
+
+通过 **坚果云 WebDAV** 作为云端中转，两台电脑各自运行服务模式（`start-sync-server.bat`），数据自动双向同步：
+
+- 每台机器的服务端启动时、状态变更后（3 秒延迟）、以及每 60 秒，执行一次：**拉取云端 → 按任务 id/更新时间合并 → 推回**
+- 合并取并集：两端同时编辑不丢数据；同一任务冲突时取 `updatedAt` 更新的版本；确定性排序保证两端收敛、不抖动
+- 公司电脑只需浏览器（网页端 `http://localhost:8787`）；家里电脑同时跑服务 + 桌面应用
+
+配置步骤：
+
+1. 注册坚果云账号，在「账户信息 → 安全选项 → 添加应用密码」生成应用密码（非登录密码）
+2. 坚果云网页端新建文件夹（如 `留痕`）
+3. 复制 `sync-config.example.json` 为 `sync-config.json`，填入云端文件 URL（`https://dav.jianguoyun.com/dav/留痕/trace-state.json`）、邮箱、应用密码
+4. 两台电脑都启动 `start-sync-server.bat` 即可自动同步
+
+> 说明：同步的是任务/月报/设置（状态 JSON）；文件库附件本体暂不跨端同步（另一端文件记录可能无法预览）。`sync-config.json` 含密码，已加入 `.gitignore` 不入库。
+
+### 方式四：直接打开原型（M1 验收用）
 
 双击 `src/web/index.html` 即可在浏览器打开，无需任何构建步骤。
 

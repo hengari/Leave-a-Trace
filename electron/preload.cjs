@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("traceDesktop", {
   isDesktop: true,
   getState: () => ipcRenderer.invoke("db:getState"),
   putState: (data) => ipcRenderer.invoke("db:putState", data),
+  createBackup: () => ipcRenderer.invoke("backup:create"),
   uploadFile: (payload) => ipcRenderer.invoke("file:upload", payload),
   getFileDataUrl: (id) => ipcRenderer.invoke("file:getDataUrl", id),
   deleteFile: (id) => ipcRenderer.invoke("file:delete", id),

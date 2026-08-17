@@ -1,7 +1,7 @@
 {
   "name": "liuhen-desktop",
   "productName": "留痕",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "留痕 · Leave a Trace 桌面版（纯本地工作记录 + 项目工作台）",
   "main": "electron/main.cjs",
   "author": "liuheng",
@@ -10,7 +10,11 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
+    "dist:publish": "electron-builder --win nsis --publish always",
     "web": "node scripts/serve.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^35.0.0",
@@ -26,6 +30,11 @@
     ],
     "directories": {
       "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "hengari",
+      "repo": "Leave-a-Trace"
     },
     "win": {
       "target": [

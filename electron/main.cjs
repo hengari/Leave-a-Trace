@@ -5,6 +5,11 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { openTraceDb } = require("./trace-db.cjs");
+// 自动更新：安全加载——安装包未打包 electron-updater 时跳过，不影响启动
+let autoUpdater = null;
+try {
+  autoUpdater = require("electron-updater").autoUpdater;
+} catch (err) { /* 未打包 electron-updater（开发模式/旧安装包），跳过自动更新 */ }
 
 // Windows DirectComposition can corrupt idle transparent always-on-top
 // windows after focus changes. Software composition keeps transparency while
@@ -591,6 +596,36 @@ function runSmoke() {
   });
 }
 
+// ---- 自动更新：检查 GitHub Releases，有新版本后台下载，就绪后询问重启 ----
+function setupAutoUpdater() {
+  if (!app.isPackaged || !autoUpdater) return; // 开发模式或未打包 electron-updater 时跳过
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("update-available", (info) => {
+    console.log("[update] v" + info.version + " 可用，开始后台下载");
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+    dialog.showMessageBox(target, {
+      type: "info",
+      title: "留痕 · 更新就绪",
+      message: "新版本 v" + info.version + " 已下载完成",
+      detail: "重启应用即可完成更新，数据不会丢失。",
+      buttons: ["立即重启", "稍后"],
+      defaultId: 0,
+      cancelId: 1
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    }).catch(() => { /* 用户取消对话框不阻塞 */ });
+  });
+  autoUpdater.on("error", (err) => {
+    console.error("[update] " + (err && err.message ? err.message : err));
+  });
+  autoUpdater.checkForUpdates().catch((err) => {
+    console.error("[update] 检查失败: " + (err && err.message ? err.message : err));
+  });
+}
+
 app.whenReady().then(async () => {
   traceDb = await openTraceDb(dataRoot());
   console.log("trace-db ready at " + traceDb.dataRoot);
@@ -610,6 +645,7 @@ app.whenReady().then(async () => {
     });
     return;
   }
+  setupAutoUpdater();
   app.on("activate", () => {
     if (!mainWindow) createWindow();
   });
@@ -624,6 +660,22 @@ app.on("window-all-closed", () => {
 /* ---- IPC：状态 ---- */
 ipcMain.handle("db:getState", () => {
   try { return traceDb.getState(); } catch (err) { return null; }
+});
+
+/* 自动备份：把当前状态写入 {dataRoot}/backups/留痕-备份-{时间戳}.json */
+ipcMain.handle("backup:create", () => {
+  try {
+    const state = traceDb.getState();
+    if (!state) return { ok: false, error: "无数据可备份" };
+    const backupsDir = path.join(traceDb.dataRoot, "backups");
+    fs.mkdirSync(backupsDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+    const file = path.join(backupsDir, "留痕-备份-" + stamp + ".json");
+    fs.writeFileSync(file, JSON.stringify(state, null, 2), "utf8");
+    return { ok: true, file };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
 });
 
 ipcMain.handle("db:putState", (e, data) => {

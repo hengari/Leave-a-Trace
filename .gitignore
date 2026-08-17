@@ -11,3 +11,6 @@ outputs/site-core-extract.txt
 
 # 用户数据（SQLite 数据库与上传文件本体，不入库）
 data/
+
+# 云端同步配置（含坚果云应用密码，不入库）
+sync-config.json

@@ -98,7 +98,9 @@ button { font-family: inherit; }
     var(--glass);
   border: 1px solid var(--line);
   border-radius: 18px;
-  box-shadow: 0 10px 34px rgba(29, 35, 32, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  /* 透明玻璃模式不投影：外阴影会透过四周 10px 透明边距，
+     在浅色桌面上呈现为灰色矩形外框（深色背景不可见） */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
   /* 高不透明度玻璃：任何桌面颜色上都呈现干净浅色，保留轻微透感 */
   -webkit-backdrop-filter: none;
   backdrop-filter: none;

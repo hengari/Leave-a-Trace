@@ -71,6 +71,7 @@ async function openTraceDb(dataRoot) {
   const db = new DatabaseSync(join(dataRoot, "trace.db"));
   db.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 5000;
     CREATE TABLE IF NOT EXISTS app_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       data TEXT NOT NULL,
@@ -111,7 +112,19 @@ async function openTraceDb(dataRoot) {
     getState() {
       const row = stmtGetState.get();
       if (!row) return null;
-      try { return JSON.parse(row.data); } catch (err) { return null; }
+      try {
+        const s = JSON.parse(row.data);
+        // 应用墓碑：已删除的任务（云端同步删除传播）不再返回
+        const del = s.deletedTasks || {};
+        const ids = Object.keys(del);
+        if (ids.length) {
+          const set = new Set(ids);
+          for (const day of Object.values(s.days || {})) {
+            day.tasks = (day.tasks || []).filter((t) => !t || !set.has(t.id));
+          }
+        }
+        return s;
+      } catch (err) { return null; }
     },
 
     putState(data) {

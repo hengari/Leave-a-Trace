@@ -253,8 +253,8 @@ function save() {
   const count = countRecords();
   const hint = state.meta.nextBackupHintAt;
   if (state.settings.backupReminderEnabled && hint > 0 && count >= hint) {
-    state.meta.nextBackupHintAt = hint + 20;
-    setTimeout(() => toast("已累计 " + count + " 条记录，建议导出备份", true), 400);
+    state.meta.nextBackupHintAt = count + 25;
+    autoBackup(count);
   }
   state.meta.recordCount = count;
   state.meta.updatedAt = new Date().toISOString();
@@ -264,6 +264,27 @@ function save() {
     toast("保存失败：数据未落盘，请检查磁盘空间", true);
   }
   scheduleServerSave();
+}
+
+/* 自动备份：超过阈值(25 条)自动把状态备份到 backups 文件夹，仅提示"已备份" */
+async function autoBackup(count) {
+  if (DESKTOP && window.traceDesktop.createBackup) {
+    try {
+      const r = await window.traceDesktop.createBackup();
+      toast(r && r.ok ? "已自动备份到备份文件夹" : "自动备份失败：" + (r && r.error || "未知错误"), !!r && !r.ok);
+    } catch (err) { toast("自动备份失败：" + err, true); }
+    return;
+  }
+  if (SERVER) {
+    try {
+      const res = await fetch("/api/backup", { method: "POST" });
+      const r = await res.json();
+      toast(r && r.ok ? "已自动备份到备份文件夹" : "自动备份失败：" + (r && r.error || "未知错误"), !!r && !r.ok);
+    } catch (err) { toast("自动备份失败：" + err, true); }
+    return;
+  }
+  // file:// 纯本地模式无法写文件，保留手动提示
+  setTimeout(() => toast("已累计 " + count + " 条记录，建议手动导出备份", true), 400);
 }
 
 /* ============ 后端同步（服务模式） ============ */
@@ -1210,12 +1231,16 @@ function removeTask(id) {
   const task = findTask(id);
   if (!task || !window.confirm("确认删除任务“" + task.text + "”？备注也会一并删除。")) return;
   let removed = false;
+  let foundDate = null;
   Object.keys(state.days).forEach((d) => {
     const before = (state.days[d].tasks || []).length;
     state.days[d].tasks = (state.days[d].tasks || []).filter((t) => t.id !== id);
-    if (state.days[d].tasks.length !== before) removed = true;
+    if (state.days[d].tasks.length !== before) { removed = true; if (!foundDate) foundDate = d; }
   });
   if (!removed) return;
+  // 墓碑：记录删除，使云端同步（WebDAV 并集合并）能传播删除，而不是被另一端“复活”
+  state.deletedTasks = state.deletedTasks || {};
+  state.deletedTasks[id] = { date: foundDate, deletedAt: new Date().toISOString() };
   save();
   renderToday();
   toast("任务已删除");
