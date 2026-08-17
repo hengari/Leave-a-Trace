@@ -9,8 +9,8 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis",
-    "dist:publish": "electron-builder --win nsis --publish always",
+    "dist": "electron-builder --win",
+    "dist:publish": "electron-builder --win --publish always",
     "web": "node scripts/serve.mjs"
   },
   "dependencies": {
@@ -40,6 +40,12 @@
       "target": [
         {
           "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64"
           ]
