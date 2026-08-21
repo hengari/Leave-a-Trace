@@ -12,10 +12,10 @@ try {
   autoUpdater = require("electron-updater").autoUpdater;
 } catch (err) { /* 未打包 electron-updater（开发模式/旧安装包），跳过自动更新 */ }
 
-// Windows DirectComposition can corrupt idle transparent always-on-top
-// windows after focus changes. Software composition keeps transparency while
-// avoiding the stale white tiles produced by the GPU surface.
-if (process.platform === "win32") app.disableHardwareAcceleration();
+// 硬件加速启用：桌面美化工具（Rainmeter/Nexus 等）会破坏软件渲染的 DWM 合成，
+// 导致窗口黑屏无法显示。启用硬件加速可正常合成。
+// （透明浮窗若出现陈旧白块问题，可改回 disableHardwareAcceleration）
+if (process.platform === "win32") app.commandLine.appendSwitch("disable-gpu-vsync");
 
 let traceDb = null;
 let mainWindow = null;
