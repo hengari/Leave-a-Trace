@@ -17,6 +17,11 @@
   --amber-soft: #f7efdf;
   --danger: #c0453c;
   --danger-soft: #f9e7e2;
+  --blue-1: #e8f1fb;
+  --blue-2: #cfe3f7;
+  --blue-3: #a9cdf0;
+  --blue-4: #7fb3e8;
+  --blue-5: #5498dd;
   --radius: 12px;
   --radius-lg: 16px;
   --shadow: 0 6px 24px rgba(32, 40, 50, 0.08), inset 0 1px rgba(255, 255, 255, 0.60);
@@ -49,6 +54,11 @@
   --amber-soft: #26200e;
   --danger: #f87171;
   --danger-soft: #271414;
+  --blue-1: #16283f;
+  --blue-2: #1e3a5f;
+  --blue-3: #2b5285;
+  --blue-4: #3b6fb0;
+  --blue-5: #5b92d4;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --on-accent: #0a1f14;
 }
@@ -105,6 +115,11 @@ h1, h2, h3, h4 {
   --amber-soft: #fdf3e3;
   --danger: #d94f4f;
   --danger-soft: #fdeaea;
+  --blue-1: #e3edf7;
+  --blue-2: #cfe0f2;
+  --blue-3: #a9c9e8;
+  --blue-4: #7fb0dc;
+  --blue-5: #5497cf;
   --radius: 10px;
   --shadow: 0 6px 24px rgba(30, 60, 100, 0.08), inset 0 1px rgba(255, 255, 255, 0.55);
   --on-accent: #fff;
@@ -2579,4 +2594,278 @@ button.task-category:disabled { cursor: default; }
   .checkin-btn.stamped .ring {
     animation: none !important;
   }
+}
+
+/* ============ 记账（复刻自 90 天计划项目） ============ */
+.finance-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 160px;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.field label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field input,
+.field textarea {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 9px 11px;
+  font: inherit;
+  resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus {
+  outline: 2px solid var(--accent-line);
+  border-color: var(--accent);
+}
+
+.finance-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.finance-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.finance-info {
+  display: grid;
+  gap: 2px;
+  min-width: 120px;
+  flex: 0 0 auto;
+}
+
+.finance-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.finance-note {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.finance-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.finance-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.finance-fill.lv-1 { background: var(--blue-1); }
+.finance-fill.lv-2 { background: var(--blue-2); }
+.finance-fill.lv-3 { background: var(--blue-3); }
+.finance-fill.lv-4 { background: var(--blue-4); }
+.finance-fill.lv-5 { background: var(--blue-5); }
+
+.finance-amount {
+  font-family: var(--font-num);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.finance-del {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
+  flex: 0 0 auto;
+}
+
+.finance-row:hover .finance-del,
+.finance-del:focus-visible {
+  opacity: 1;
+}
+
+.finance-del:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.finance-row.entering {
+  animation: finance-in 0.35s ease;
+}
+
+@keyframes finance-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.finance-total {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.year-select {
+  min-width: 120px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.month-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.month-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.month-head strong {
+  font-size: 15px;
+}
+
+.month-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.month-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 14px);
+  gap: 3px;
+  margin-bottom: 5px;
+  justify-content: center;
+}
+
+.month-weekdays span {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.month-heat {
+  display: grid;
+  grid-template-columns: repeat(7, 14px);
+  grid-auto-rows: 14px;
+  gap: 3px;
+  width: 100%;
+  justify-content: center;
+}
+
+.month-heat .day-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.day-cell {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--track);
+  cursor: pointer;
+}
+
+.day-cell:hover,
+.day-cell.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.day-cell.lv-1 { background: var(--blue-1); }
+.day-cell.lv-2 { background: var(--blue-2); }
+.day-cell.lv-3 { background: var(--blue-3); }
+.day-cell.lv-4 { background: var(--blue-4); }
+.day-cell.lv-5 { background: var(--blue-5); }
+
+.detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.detail-mark {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 6px;
+  border: 2px solid #aab3ad;
+  background: var(--panel);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.detail-mark.done {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.detail-text {
+  font-size: 14px;
 }

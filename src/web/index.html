@@ -22,6 +22,7 @@
         <a class="nav-link" href="#today">今日记录</a>
         <a class="nav-link" href="#monthly">月度汇总</a>
         <a class="nav-link" href="#files">文件库</a>
+        <a class="nav-link" href="#finance">记账</a>
         <a class="nav-link" href="#backup">备份与恢复</a>
         <a class="nav-link" href="#settings">设置</a>
         <a class="nav-link" href="#workbench">项目工作台</a>
@@ -290,6 +291,49 @@
         <div class="wb-view" id="wb-projects"></div>
         <div class="wb-view" id="wb-reports"></div>
         <div class="wb-view" id="wb-settings"></div>
+      </section>
+
+      <!-- 记账 -->
+      <section class="view" id="view-finance">
+        <header class="page-head">
+          <p class="eyebrow" id="finance-date"></p>
+          <h1>记账</h1>
+        </header>
+        <section class="panel">
+          <div class="panel-head"><h2>添加消费</h2></div>
+          <form id="finance-form">
+            <div class="finance-form-grid">
+              <div class="field">
+                <label for="finance-name">消费名称</label>
+                <input id="finance-name" type="text" maxlength="40" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="finance-amount">金额</label>
+                <input id="finance-amount" type="number" min="0" step="0.01" inputmode="decimal">
+              </div>
+            </div>
+            <div class="field">
+              <label for="finance-note">备注</label>
+              <textarea id="finance-note" rows="2" placeholder="写点什么"></textarea>
+            </div>
+            <div class="btn-row">
+              <button class="primary-btn" id="finance-add-btn" type="submit">添加</button>
+            </div>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>今日消费清单</h2><span class="count" id="finance-count"></span></div>
+          <ul class="finance-list" id="finance-items"></ul>
+          <div class="finance-total" id="finance-total">合计 0 元</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>每月消费热力图</h2><select class="year-select" id="finance-year" aria-label="选择年份"></select></div>
+          <div class="month-grid" id="finance-month-grid"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2 id="finance-day-detail-title">点击热力图某天查看当天消费</h2></div>
+          <ul class="detail-list" id="finance-day-detail-list"></ul>
+        </section>
       </section>
     </main>
   </div>

@@ -158,6 +158,7 @@ function emptyState() {
     days: {},
     files: [],
     monthlyReports: [],
+    finance: { items: [] },
     settings: {
       gradientThresholdMin: 60,
       style: "paper",
@@ -489,7 +490,7 @@ function applyTheme(style) {
 /* ============ 路由 ============ */
 function currentView() {
   const h = location.hash.replace("#", "");
-  return ["today", "monthly", "files", "backup", "settings", "workbench"].indexOf(h) >= 0 ? h : "today";
+  return ["today", "monthly", "files", "finance", "backup", "settings", "workbench"].indexOf(h) >= 0 ? h : "today";
 }
 
 function renderRoute() {
@@ -506,6 +507,7 @@ function renderRoute() {
   if (view === "backup") renderBackup();
   if (view === "settings") renderSettings();
   if (view === "workbench" && typeof renderWorkbench === "function") renderWorkbench();
+  if (view === "finance") renderFinanceRoute();
 }
 
 /* ============ 今日页 ============ */
@@ -2294,6 +2296,234 @@ function goSearchReport(id) {
   if (currentView() !== "monthly") location.hash = "#monthly";
   renderRoute();
   setTimeout(() => highlightBySelector('[data-id="' + id + '"]'), 80);
+}
+
+/* ============ 记账（复刻自 90 天计划项目） ============ */
+let financeInitialized = false;
+let financeDetailDate = null;
+
+function financeItems() {
+  return (state.finance && state.finance.items) || [];
+}
+
+function financeItemsFor(date) {
+  return financeItems().filter((it) => it.date === date);
+}
+
+function financeTotal(items) {
+  return items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+}
+
+function heatLevel(percent) {
+  if (percent <= 0) return 0;
+  if (percent < 25) return 1;
+  if (percent < 50) return 2;
+  if (percent < 75) return 3;
+  if (percent < 100) return 4;
+  return 5;
+}
+
+function financeMonthlySummary(year) {
+  const months = [];
+  for (let m = 1; m <= 12; m++) {
+    const dim = new Date(year, m, 0).getDate();
+    const days = [];
+    let monthTotal = 0;
+    for (let d = 1; d <= dim; d++) {
+      const date = year + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+      if (date > todayStr()) continue;
+      const items = financeItemsFor(date);
+      const total = financeTotal(items);
+      monthTotal += total;
+      days.push({ date, total: Math.round(total * 100) / 100, items });
+    }
+    months.push({ month: m, label: m + " 月", days, total: Math.round(monthTotal * 100) / 100 });
+  }
+  return months;
+}
+
+function renderFinance() {
+  const date = todayStr();
+  $("#finance-date").textContent = date;
+  const items = financeItemsFor(date);
+  const list = $("#finance-items");
+  list.textContent = "";
+  const max = Math.max(1, ...items.map((it) => Number(it.amount) || 0));
+  items.forEach((item, index) => {
+    const row = document.createElement("li");
+    row.className = "finance-row" + (index === items.length - 1 ? " entering" : "");
+    const info = document.createElement("div");
+    info.className = "finance-info";
+    const name = document.createElement("span");
+    name.className = "finance-name";
+    name.textContent = item.name;
+    info.appendChild(name);
+    if (item.note) {
+      const note = document.createElement("span");
+      note.className = "finance-note";
+      note.textContent = item.note;
+      info.appendChild(note);
+    }
+    const track = document.createElement("div");
+    track.className = "finance-bar";
+    const ratio = max > 0 ? Math.round((Number(item.amount) / max) * 100) : 0;
+    track.title = item.name + " · " + item.amount + " 元" + (item.note ? " · " + item.note : "");
+    const fill = document.createElement("span");
+    fill.className = "finance-fill lv-" + Math.max(1, heatLevel(ratio));
+    fill.style.width = ratio + "%";
+    track.appendChild(fill);
+    const amount = document.createElement("span");
+    amount.className = "finance-amount";
+    amount.textContent = "¥" + item.amount;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "finance-del";
+    del.textContent = "✕";
+    del.title = "删除这笔消费";
+    del.setAttribute("aria-label", "删除 " + item.name + " " + item.amount + " 元");
+    del.addEventListener("click", () => removeFinanceItem(item.id));
+    row.append(info, track, amount, del);
+    list.appendChild(row);
+  });
+  $("#finance-total").textContent = "合计 " + financeTotal(items).toFixed(2) + " 元";
+  $("#finance-count").textContent = items.length + " 笔";
+}
+
+function renderFinanceDayDetail(date) {
+  financeDetailDate = date;
+  const items = financeItemsFor(date);
+  $("#finance-day-detail-title").textContent = date + " · 共消费 " + financeTotal(items).toFixed(2) + " 元";
+  const list = $("#finance-day-detail-list");
+  list.textContent = "";
+  if (!items.length) {
+    const li = document.createElement("li");
+    li.className = "detail-item";
+    const text = document.createElement("span");
+    text.className = "detail-text";
+    text.textContent = "这天没有消费记录";
+    li.appendChild(text);
+    list.appendChild(li);
+    return;
+  }
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = "detail-item";
+    const mark = document.createElement("span");
+    mark.className = "detail-mark done";
+    mark.textContent = "¥";
+    const text = document.createElement("span");
+    text.className = "detail-text";
+    text.textContent = item.name + " · " + item.amount + " 元" + (item.note ? "（" + item.note + "）" : "");
+    li.append(mark, text);
+    list.appendChild(li);
+  });
+}
+
+function renderFinanceMonths(year) {
+  const months = financeMonthlySummary(year);
+  const grid = $("#finance-month-grid");
+  grid.textContent = "";
+  const allDays = months.flatMap((month) => month.days);
+  const maxTotal = Math.max(1, ...allDays.map((day) => day.total || 0));
+  months.forEach((month) => {
+    const card = document.createElement("div");
+    card.className = "month-card";
+    const head = document.createElement("div");
+    head.className = "month-head";
+    const strong = document.createElement("strong");
+    strong.textContent = month.label;
+    const span = document.createElement("span");
+    span.textContent = "共消费 " + month.total + " 元";
+    head.append(strong, span);
+    const weekdays = document.createElement("div");
+    weekdays.className = "month-weekdays";
+    ["一", "二", "三", "四", "五", "六", "日"].forEach((wd) => {
+      const s = document.createElement("span");
+      s.textContent = wd;
+      weekdays.appendChild(s);
+    });
+    const heat = document.createElement("div");
+    heat.className = "month-heat";
+    month.days.forEach((day) => {
+      const ratio = maxTotal > 0 ? Math.round(((day.total || 0) / maxTotal) * 100) : 0;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "day-cell lv-" + heatLevel(ratio) + (financeDetailDate === day.date ? " selected" : "");
+      btn.style.gridColumnStart = (new Date(day.date + "T00:00:00").getDay() + 6) % 7 + 1;
+      btn.title = day.date + " · " + day.total + " 元";
+      btn.setAttribute("aria-label", btn.title);
+      btn.addEventListener("click", () => {
+        grid.querySelectorAll(".day-cell").forEach((cell) => cell.classList.remove("selected"));
+        btn.classList.add("selected");
+        renderFinanceDayDetail(day.date);
+      });
+      heat.appendChild(btn);
+    });
+    card.append(head, weekdays, heat);
+    grid.appendChild(card);
+  });
+}
+
+function refreshFinanceMonths() {
+  const select = $("#finance-year");
+  if (select) renderFinanceMonths(parseInt(select.value, 10) || new Date().getFullYear());
+}
+
+function removeFinanceItem(id) {
+  const items = financeItems();
+  const idx = items.findIndex((it) => it.id === id);
+  if (idx < 0) return;
+  items.splice(idx, 1);
+  save();
+  renderFinance();
+  refreshFinanceMonths();
+  toast("已删除");
+}
+
+function renderFinanceRoute() {
+  if (!financeInitialized) {
+    financeInitialized = true;
+    const select = $("#finance-year");
+    const startYear = Math.min(new Date().getFullYear(), parseInt((state.meta.createdAt || "").slice(0, 4), 10) || new Date().getFullYear());
+    const currentYear = new Date().getFullYear();
+    select.textContent = "";
+    for (let y = currentYear; y >= startYear; y--) {
+      const option = document.createElement("option");
+      option.value = y;
+      option.textContent = y + " 年";
+      select.appendChild(option);
+    }
+    select.value = String(currentYear);
+    select.addEventListener("change", () => renderFinanceMonths(parseInt(select.value, 10)));
+    $("#finance-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = $("#finance-name").value.trim();
+      const amount = Number($("#finance-amount").value);
+      if (!name || !(amount > 0)) {
+        toast("请填写消费名称和有效金额", true);
+        return;
+      }
+      financeItems().push({
+        id: uid("f"),
+        name: name,
+        amount: Math.round(amount * 100) / 100,
+        note: $("#finance-note").value.trim(),
+        date: todayStr(),
+        createdAt: new Date().toISOString()
+      });
+      save();
+      $("#finance-name").value = "";
+      $("#finance-amount").value = "";
+      $("#finance-note").value = "";
+      $("#finance-name").focus();
+      renderFinance();
+      refreshFinanceMonths();
+      toast("已添加");
+    });
+  }
+  renderFinance();
+  refreshFinanceMonths();
+  if (financeDetailDate) renderFinanceDayDetail(financeDetailDate);
 }
 
 /* ============ 备份与恢复 ============ */

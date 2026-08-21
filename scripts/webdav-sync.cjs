@@ -129,6 +129,10 @@ function mergeSyncState(local, remote) {
   const localMeta = local.meta || {};
   const remoteMeta = remote.meta || {};
   const settings = (localMeta.updatedAt || "") >= (remoteMeta.updatedAt || "") ? local.settings : remote.settings;
+  // 记账：按 id 取并集
+  const finance = {};
+  for (const f of ((local.finance && local.finance.items) || [])) if (f && f.id) finance[f.id] = f;
+  for (const f of ((remote.finance && remote.finance.items) || [])) if (f && f.id) finance[f.id] = f;
   let count = 0;
   for (const day of Object.values(days)) count += (day.tasks || []).length;
   return {
@@ -143,6 +147,7 @@ function mergeSyncState(local, remote) {
     files: Object.values(files),
     monthlyReports: Object.values(reports),
     deletedTasks: deleted,
+    finance: { items: Object.values(finance).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "")) },
     settings
   };
 }

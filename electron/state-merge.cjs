@@ -65,6 +65,10 @@ function mergeState(existing, incoming) {
   }
   const exMeta = existing.meta || {};
   const inMeta = incoming.meta || {};
+  // 记账：按 id 取并集（同一笔冲突保留双方，不丢账目）
+  const finance = {};
+  for (const f of (existing.finance && existing.finance.items || [])) if (f && f.id) finance[f.id] = f;
+  for (const f of (incoming.finance && incoming.finance.items || [])) if (f && f.id) finance[f.id] = f;
   let count = 0;
   for (const day of Object.values(days)) count += (day.tasks || []).length;
   return {
@@ -79,6 +83,7 @@ function mergeState(existing, incoming) {
     files: Object.values(files),
     monthlyReports: Object.values(reports),
     deletedTasks: deleted,
+    finance: { items: Object.values(finance).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "")) },
     settings: incoming.settings || existing.settings || {}
   };
 }
