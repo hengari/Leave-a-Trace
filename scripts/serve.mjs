@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import traceDbMod from "../electron/trace-db.cjs";
 import webdavSyncMod from "./webdav-sync.cjs";
+import { mergeState } from "../electron/state-merge.cjs";
 
 const { openTraceDb, MIME } = traceDbMod;
 const { syncOnce } = webdavSyncMod;
@@ -111,63 +112,13 @@ function safeId(id) {
   return typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
 }
 
-/* 合并状态：按日期/任务 id 取并集（incoming 优先），
-   防止网页端与桌面端同时编辑时整表覆盖丢失对方数据。
-   注意：网页端删除的任务会保留（避免误删覆盖），桌面端删除仍即时生效 */
-function mergeState(existing, incoming) {
-  if (!existing) return incoming;
-  const days = {};
-  const allDates = new Set([...Object.keys(existing.days || {}), ...Object.keys(incoming.days || {})]);
-  for (const date of allDates) {
-    const ex = (existing.days && existing.days[date]) || null;
-    const inc = (incoming.days && incoming.days[date]) || null;
-    if (!inc) { days[date] = ex; continue; }
-    if (!ex) { days[date] = inc; continue; }
-    const tasks = {};
-    for (const t of (ex.tasks || [])) if (t && t.id) tasks[t.id] = t;
-    for (const t of (inc.tasks || [])) if (t && t.id) tasks[t.id] = t;
-    days[date] = { ...inc, tasks: Object.values(tasks), checkIn: inc.checkIn || ex.checkIn || null };
-  }
-  const files = {};
-  for (const f of (existing.files || [])) if (f && f.id) files[f.id] = f;
-  for (const f of (incoming.files || [])) if (f && f.id) files[f.id] = f;
-  const reports = {};
-  for (const r of (existing.monthlyReports || [])) if (r && (r.id || r.month)) reports[r.id || r.month] = r;
-  for (const r of (incoming.monthlyReports || [])) if (r && (r.id || r.month)) reports[r.id || r.month] = r;
-  // 墓碑合并：按 id 取 deletedAt 较新者，并应用到 days（删除跨端传播）
-  const deleted = {};
-  for (const [id, t] of Object.entries(existing.deletedTasks || {})) deleted[id] = t;
-  for (const [id, t] of Object.entries(incoming.deletedTasks || {})) {
-    if (!deleted[id] || (t.deletedAt || "") > (deleted[id].deletedAt || "")) deleted[id] = t;
-  }
-  for (const day of Object.values(days)) {
-    day.tasks = (day.tasks || []).filter((task) => !deleted[task.id]);
-  }
-  let count = 0;
-  for (const day of Object.values(days)) count += (day.tasks || []).length;
-  return {
-    meta: {
-      version: 1,
-      createdAt: incoming.meta.createdAt || (existing.meta && existing.meta.createdAt) || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      recordCount: count,
-      nextBackupHintAt: incoming.meta.nextBackupHintAt ?? (existing.meta && existing.meta.nextBackupHintAt) ?? 20
-    },
-    days,
-    files: Object.values(files),
-    monthlyReports: Object.values(reports),
-    deletedTasks: deleted,
-    settings: incoming.settings || existing.settings || {}
-  };
-}
-
 /* ---------- API：状态 ---------- */
 async function apiGetState(req, res) {
   const data = traceDb.getState();
   sendJson(res, 200, { ok: true, data });
 }
 
-async function apiPutState(req, res) {
+async function apiPutState(req, res, url) {
   try {
     const body = await readBody(req, MAX_STATE_BYTES);
     const data = JSON.parse(body.toString("utf8"));
@@ -176,7 +127,8 @@ async function apiPutState(req, res) {
       return;
     }
     const existing = traceDb.getState();
-    const merged = mergeState(existing, data);
+    const replace = url && url.searchParams.get("replace") === "1";
+    const merged = replace ? data : mergeState(existing, data);
     const updatedAt = traceDb.putState(merged);
     scheduleSync("状态变更");
     sendJson(res, 200, { ok: true, updatedAt });
@@ -269,7 +221,7 @@ async function route(req, res) {
 
   if (path === "/api/state") {
     if (req.method === "GET") { apiGetState(req, res); return; }
-    if (req.method === "PUT") { apiPutState(req, res); return; }
+    if (req.method === "PUT") { apiPutState(req, res, url); return; }
     sendJson(res, 405, { ok: false, error: "method not allowed" });
     return;
   }

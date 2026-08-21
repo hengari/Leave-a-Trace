@@ -5,6 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { openTraceDb } = require("./trace-db.cjs");
+const { mergeState } = require("./state-merge.cjs");
 // 自动更新：安全加载——安装包未打包 electron-updater 时跳过，不影响启动
 let autoUpdater = null;
 try {
@@ -683,10 +684,27 @@ ipcMain.handle("db:putState", (e, data) => {
     return { ok: false, error: "state 格式不正确" };
   }
   try {
-    const oldIds = new Set(traceTaskSummaries(traceDb.getState()).map((task) => task.id));
-    traceDb.putState(data);
-    const added = traceTaskSummaries(data).some((task) => !task.completed && !oldIds.has(task.id));
+    // 合并写入：与已有状态按任务 id 取并集，防止应用内存状态过期时整表覆盖丢失数据
+    const existing = traceDb.getState();
+    const oldIds = new Set(traceTaskSummaries(existing).map((task) => task.id));
+    const merged = mergeState(existing, data);
+    traceDb.putState(merged);
+    const added = traceTaskSummaries(merged).some((task) => !task.completed && !oldIds.has(task.id));
     broadcastTaskSnapshot(added);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+/* 整表替换写入：仅用于"清空演示数据 / 恢复演示数据 / 导入替换"等有意的破坏性操作 */
+ipcMain.handle("db:putStateReplace", (e, data) => {
+  if (!data || typeof data !== "object" || !data.meta || !data.days) {
+    return { ok: false, error: "state 格式不正确" };
+  }
+  try {
+    traceDb.putState(data);
+    broadcastTaskSnapshot(true);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };

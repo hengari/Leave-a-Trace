@@ -249,7 +249,7 @@ function demoState() {
   return st;
 }
 
-function save() {
+function save(replace) {
   const count = countRecords();
   const hint = state.meta.nextBackupHintAt;
   if (state.settings.backupReminderEnabled && hint > 0 && count >= hint) {
@@ -263,7 +263,7 @@ function save() {
   } catch (err) {
     toast("保存失败：数据未落盘，请检查磁盘空间", true);
   }
-  scheduleServerSave();
+  scheduleServerSave(replace);
 }
 
 /* 自动备份：超过阈值(25 条)自动把状态备份到 backups 文件夹，仅提示"已备份" */
@@ -303,14 +303,17 @@ async function apiGetState() {
 }
 
 let serverSaveTimer = null;
-function scheduleServerSave() {
+function scheduleServerSave(replace) {
   if (!REMOTE) return;
   clearTimeout(serverSaveTimer);
   serverSaveTimer = setTimeout(() => {
     if (DESKTOP) {
-      window.traceDesktop.putState(state).catch(() => toast("保存失败：数据未写入数据库", true));
+      const fn = replace && window.traceDesktop.putStateReplace
+        ? window.traceDesktop.putStateReplace
+        : window.traceDesktop.putState;
+      fn(state).catch(() => toast("保存失败：数据未写入数据库", true));
     } else {
-      fetch("/api/state", {
+      fetch("/api/state" + (replace ? "?replace=1" : ""), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(state)
@@ -2360,7 +2363,7 @@ function applyImport(mode) {
     });
   }
   pendingImport = null;
-  save();
+  save(mode === "replace");
   $("#import-modal").classList.add("hidden");
   renderRoute();
   toast(mode === "replace" ? "已替换全部数据" : "已合并导入");
@@ -2378,14 +2381,14 @@ function clearDemo() {
   const keep = state.settings;
   state = emptyState();
   state.settings = keep;
-  save();
+  save(true);
   renderRoute();
   toast("演示数据已清空");
 }
 
 function restoreDemo() {
   state = demoState();
-  save();
+  save(true);
   renderRoute();
   toast("演示数据已恢复");
 }
